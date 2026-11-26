@@ -37,7 +37,7 @@
       }
       window.__adobe_cep__.evalScript(script, function (res) {
         if (!res || res === "EvalScript error.") {
-          reject(new Error("EvalScript error — check Edit > Preferences > Scripting & Expressions > Allow Scripts to Write Files."));
+          reject(new Error("Enable: Edit > Preferences > Scripting & Expressions > Allow Scripts to Write Files."));
         } else {
           resolve(res);
         }
@@ -56,17 +56,13 @@
   function ensureHostLoaded() {
     if (hostLoaded) return Promise.resolve();
     return new Promise(function (resolve) {
-      window.__adobe_cep__.evalScript("typeof PixopikAE", function (res) {
-        if (res === "object") {
-          hostLoaded = true;
-          resolve();
-        } else {
-          var jsxPath = (getExtensionRoot() + "/jsx/host.jsx").replace(/\\/g, "/");
-          window.__adobe_cep__.evalScript('$.evalFile("' + jsxPath + '"); typeof PixopikAE;', function () {
-            hostLoaded = true;
-            resolve();
-          });
-        }
+      var root = getExtensionRoot().replace(/\\/g, "/");
+      var boot = 'if (typeof PixopikAE === "undefined") { $.evalFile("' + root + '/jsx/host.jsx"); } ' +
+                 'if (typeof PixopikAE !== "undefined" && !PixopikAE._addonLoaded) { $.evalFile("' + root + '/jsx/recorder-addon.jsx"); } ' +
+                 '"OK"';
+      window.__adobe_cep__.evalScript(boot, function () {
+        hostLoaded = true;
+        resolve();
       });
     });
   }
@@ -91,9 +87,7 @@
     }
     var raw = motionData.samples;
     var smoothed = [];
-    var sx = raw[0].x;
-    var sy = raw[0].y;
-    var alpha = 0.32;
+    var sx = raw[0].x, sy = raw[0].y, alpha = 0.32;
 
     for (var i = 0; i < raw.length; i++) {
       sx = sx + alpha * (raw[i].x - sx);
@@ -102,8 +96,7 @@
     }
 
     var step = Math.max(1, Math.ceil(smoothed.length / 220));
-    var cursorKeys = [];
-    var prevT = -1;
+    var cursorKeys = [], prevT = -1;
     for (var j = 0; j < smoothed.length; j += step) {
       if (smoothed[j].t - prevT >= 0.04) {
         cursorKeys.push(smoothed[j]);
@@ -111,9 +104,7 @@
       }
     }
     var last = smoothed[smoothed.length - 1];
-    if (!cursorKeys.length || cursorKeys[cursorKeys.length - 1].t < last.t) {
-      cursorKeys.push(last);
-    }
+    if (!cursorKeys.length || cursorKeys[cursorKeys.length - 1].t < last.t) cursorKeys.push(last);
 
     var clicks = Array.isArray(motionData.clicks) ? motionData.clicks.slice(0, 80) : [];
     var zoomSegments = [];
@@ -150,19 +141,11 @@
       videoPath: args.videoPath || "",
       motionJsonPath: args.motionJsonPath || ""
     });
-
     var processedMotion = null;
     if (info.motionText) {
-      try {
-        processedMotion = processMotionTelemetry(JSON.parse(info.motionText));
-      } catch (_e) {}
+      try { processedMotion = processMotionTelemetry(JSON.parse(info.motionText)); } catch (_e) {}
     }
-
-    var payload = Object.assign({}, args, {
-      videoPath: info.videoPath,
-      motion: processedMotion
-    });
-
+    var payload = Object.assign({}, args, { videoPath: info.videoPath, motion: processedMotion });
     log("Auto-rigging " + info.videoPath.split("/").pop() + "...");
     var res = await callHost("import_and_autorig_recording", payload);
     log("Rig ready: " + res.compName);
@@ -171,35 +154,22 @@
 
   async function executeTool(tool, args) {
     if (tool === "import_and_autorig_recording") {
-      var rigOut = await handleAutoRig(args || {});
-      return { output: rigOut };
+      return { output: await handleAutoRig(args || {}) };
     }
-
     if (tool === "export_frame_preview") {
-      var frameRes = await callHost("export_frame_preview_b64", {
-        timeSeconds: args ? args.timeSeconds : undefined
-      });
+      var frameRes = await callHost("export_frame_preview_b64", { timeSeconds: args ? args.timeSeconds : undefined });
       if (frameRes && frameRes.base64) {
-        return {
-          base64: frameRes.base64,
-          mimeType: "image/png",
-          output: { ok: true, comp: frameRes.comp, timeSeconds: frameRes.timeSeconds }
-        };
+        return { base64: frameRes.base64, mimeType: "image/png", output: { ok: true, comp: frameRes.comp, timeSeconds: frameRes.timeSeconds } };
       }
       return { output: frameRes };
     }
-
-    var out = await callHost(tool, args || {});
-    return { output: out };
+    return { output: await callHost(tool, args || {}) };
   }
 
   function connectWS() {
-    if (ws) {
-      try { ws.close(); } catch (_e) {}
-    }
-    var url = wsInput.value.trim();
+    if (ws) { try { ws.close(); } catch (_e) {} }
     setStatus("connecting", "Connecting...");
-    ws = new WebSocket(url);
+    ws = new WebSocket(wsInput.value.trim());
 
     ws.onopen = function () {
       setStatus("connected", "Connected & Ready!");
@@ -234,17 +204,10 @@
     };
   }
 
-  /* Recorder & Quick Action Buttons (100% Zero-Node CEP Compatible via ExtendScript!) */
   document.getElementById("btnRecord").onclick = async function () {
     try {
-      log("Starting 60fps cursor-free screen recorder...");
-      var extRoot = getExtensionRoot();
-      var startRes = await callHost("start_screen_recorder", { extRoot: extRoot });
-      if (startRes.ffmpegMissing) {
-        document.getElementById("ffmpegBar").classList.remove("hidden");
-        log("FFmpeg missing — click Auto-Install FFmpeg first!");
-        return;
-      }
+      log("Starting 60fps screen + motion recorder...");
+      var startRes = await callHost("start_screen_recorder", { extRoot: getExtensionRoot() });
       activeSessionDir = startRes.sessionDir;
       document.getElementById("btnRecord").classList.add("hidden");
       document.getElementById("btnStop").classList.remove("hidden");
@@ -254,10 +217,8 @@
       log("RECORDING LIVE! Move mouse & click buttons...");
       recTimerInt = setInterval(function () {
         var sec = Math.floor((Date.now() - recStartMs) / 1000);
-        var mm = String(Math.floor(sec / 60));
-        if (mm.length < 2) mm = "0" + mm;
-        var ss = String(sec % 60);
-        if (ss.length < 2) ss = "0" + ss;
+        var mm = ("0" + Math.floor(sec / 60)).slice(-2);
+        var ss = ("0" + (sec % 60)).slice(-2);
         timerEl.textContent = mm + ":" + ss + " • Recording 60fps + Motion...";
       }, 500);
     } catch (err) {
@@ -281,8 +242,9 @@
             document.getElementById("btnRecord").classList.remove("hidden");
             document.getElementById("recTimer").classList.add("hidden");
             if (st.status && st.status.indexOf("FFMPEG_NOT_FOUND") !== -1) {
-              document.getElementById("ffmpegBar").classList.remove("hidden");
-              log("FFmpeg not installed! Click Auto-Install button.");
+              var bar = document.getElementById("ffmpegBar");
+              if (bar) bar.classList.remove("hidden");
+              log("FFmpeg missing — click Auto-Install!");
               return;
             }
             await handleAutoRig({
@@ -326,39 +288,38 @@
           clickRipples: document.getElementById("chkRipples").checked
         });
       }
-    } catch (e) {
-      log("Import error: " + e.message);
-    }
+    } catch (e) { log("Import error: " + e.message); }
   };
 
-  document.getElementById("btnInstallFfmpeg").onclick = function () {
-    log("Launching FFmpeg Winget installer window...");
-    callHost("install_ffmpeg_winget", {}).then(function () {
-      log("Winget installer opened! Restart AE once complete.");
-    }).catch(function (e) { log("Error: " + e.message); });
-  };
+  var btnFfmpeg = document.getElementById("btnInstallFfmpeg");
+  if (btnFfmpeg) {
+    btnFfmpeg.onclick = function () {
+      callHost("install_ffmpeg_winget", {}).then(function () { log("Winget FFmpeg installer opened!"); });
+    };
+  }
 
-  document.getElementById("btnNewComp").onclick = function () {
-    callHost("create_composition", {
-      name: "Pixopik_SaaS_Demo",
-      preset: document.getElementById("aspectSelect").value
-    }).then(function (r) { log("Created comp: " + r.compName); }).catch(function (e) { log(e.message); });
-  };
+  var btnNewComp = document.getElementById("btnNewComp");
+  if (btnNewComp) {
+    btnNewComp.onclick = function () {
+      callHost("create_composition", { name: "Pixopik_SaaS_Demo", preset: document.getElementById("aspectSelect").value })
+        .then(function (r) { log("Created comp: " + r.compName); }).catch(function (e) { log(e.message); });
+    };
+  }
 
   document.getElementById("btnAddZoom").onclick = function () {
-    callHost("add_smart_zoom_at_playhead", { zoomPercent: 195 }).then(function () { log("Added Smart Zoom at playhead!"); }).catch(function (e) { log(e.message); });
+    callHost("add_smart_zoom_at_playhead", { zoomPercent: 195 }).then(function () { log("Added Smart Zoom!"); }).catch(function (e) { log(e.message); });
   };
   document.getElementById("btnSpotlight").onclick = function () {
     callHost("add_spotlight_at_playhead", {}).then(function () { log("Added Spotlight Focus!"); }).catch(function (e) { log(e.message); });
   };
   document.getElementById("btnBlur").onclick = function () {
-    callHost("add_blur_at_playhead", {}).then(function () { log("Added Privacy Blur zone!"); }).catch(function (e) { log(e.message); });
+    callHost("add_blur_at_playhead", {}).then(function () { log("Added Privacy Blur!"); }).catch(function (e) { log(e.message); });
   };
   document.getElementById("btnCallout").onclick = function () {
     callHost("add_callout_at_playhead", { text: "Pro Tip • Click Here" }).then(function () { log("Added SaaS Callout!"); }).catch(function (e) { log(e.message); });
   };
   document.getElementById("btnShorts").onclick = function () {
-    callHost("convert_comp_for_shorts", { zoomPercent: 210 }).then(function () { log("Converted to 1080x1920 Shorts!"); }).catch(function (e) { log(e.message); });
+    callHost("convert_comp_for_shorts", { zoomPercent: 210 }).then(function () { log("Converted to 9:16 Shorts!"); }).catch(function (e) { log(e.message); });
   };
   document.getElementById("btn3dTilt").onclick = function () {
     callHost("apply_3d_saas_perspective", {}).then(function () { log("Applied 3D SaaS Tilt!"); }).catch(function (e) { log(e.message); });
