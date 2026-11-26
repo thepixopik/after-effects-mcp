@@ -11,6 +11,14 @@
   var wsInput = document.getElementById("wsUrl");
   var quickBanner = document.getElementById("quickBanner");
 
+  function getNode(mod) {
+    try {
+      if (window.cep_node && window.cep_node.require) return window.cep_node.require(mod);
+      if (typeof require === "function") return require(mod);
+    } catch (_e) {}
+    return null;
+  }
+
   function encodeB64Utf8(str) {
     return window.btoa(unescape(encodeURIComponent(str)));
   }
@@ -37,7 +45,7 @@
       }
       window.__adobe_cep__.evalScript(script, function (res) {
         if (!res || res === "EvalScript error.") {
-          reject(new Error("Enable: Edit > Preferences > Scripting & Expressions > Allow Scripts to Write Files."));
+          reject(new Error("ExtendScript error — verify Allow Scripts to Write Files is ON."));
         } else {
           resolve(res);
         }
@@ -174,7 +182,7 @@
     ws.onopen = function () {
       setStatus("connected", "Connected & Ready!");
       log("Connected to Cloudflare! Ready for AI Video commands.");
-      ws.send(JSON.stringify({ type: "hello", app: "after-effects", version: "0.2.0" }));
+      ws.send(JSON.stringify({ type: "hello", app: "after-effects", version: "0.2.1" }));
       clearInterval(pingTimer);
       pingTimer = setInterval(function () {
         if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "ping" }));
@@ -207,14 +215,25 @@
   document.getElementById("btnRecord").onclick = async function () {
     try {
       log("Starting 60fps screen + motion recorder...");
-      var startRes = await callHost("start_screen_recorder", { extRoot: getExtensionRoot() });
-      activeSessionDir = startRes.sessionDir;
+      var cp = getNode("child_process"), fs = getNode("fs"), path = getNode("path"), os = getNode("os");
+      if (cp && fs && path && os) {
+        var recRoot = path.join(os.homedir(), "Videos", "PixopikRecordings");
+        fs.mkdirSync(recRoot, { recursive: true });
+        var stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+        activeSessionDir = path.join(recRoot, "rec_" + stamp);
+        fs.mkdirSync(activeSessionDir, { recursive: true });
+        var psScript = path.join(getExtensionRoot(), "recorder", "capture-session.ps1");
+        cp.spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", psScript, "-SessionDir", activeSessionDir, "-Fps", "60"], { windowsHide: true });
+      } else {
+        var startRes = await callHost("start_screen_recorder", { extRoot: getExtensionRoot() });
+        activeSessionDir = startRes.sessionDir;
+      }
       document.getElementById("btnRecord").classList.add("hidden");
       document.getElementById("btnStop").classList.remove("hidden");
       var timerEl = document.getElementById("recTimer");
       timerEl.classList.remove("hidden");
       recStartMs = Date.now();
-      log("RECORDING LIVE! Move mouse & click buttons...");
+      log("RECORDING LIVE! Record at least 3-5s & click buttons...");
       recTimerInt = setInterval(function () {
         var sec = Math.floor((Date.now() - recStartMs) / 1000);
         var mm = ("0" + Math.floor(sec / 60)).slice(-2);
@@ -230,13 +249,18 @@
     clearInterval(recTimerInt);
     document.getElementById("recTimer").textContent = "Finalizing MP4 & Auto-Rigging...";
     try {
-      await callHost("stop_screen_recorder", { sessionDir: activeSessionDir });
+      var fs = getNode("fs"), path = getNode("path");
+      if (fs && path && activeSessionDir) {
+        fs.writeFileSync(path.join(activeSessionDir, "stop.signal"), "STOP", "utf8");
+      } else {
+        await callHost("stop_screen_recorder", { sessionDir: activeSessionDir });
+      }
       var checks = 0;
       var poll = setInterval(async function () {
         checks++;
         try {
-          var st = await callHost("check_recorder_done", { sessionDir: activeSessionDir });
-          if (st.done || checks > 20) {
+          var st = await callHost("check_recorder_done", { sessionDir: String(activeSessionDir).replace(/\\/g, "/") });
+          if (st.done || checks > 24) {
             clearInterval(poll);
             document.getElementById("btnStop").classList.add("hidden");
             document.getElementById("btnRecord").classList.remove("hidden");
@@ -248,7 +272,7 @@
               return;
             }
             await handleAutoRig({
-              sessionFolder: activeSessionDir,
+              sessionFolder: String(activeSessionDir).replace(/\\/g, "/"),
               aspectPreset: document.getElementById("aspectSelect").value,
               autoZoom: document.getElementById("chkAutoZoom").checked,
               vectorCursor: document.getElementById("chkVectorCursor").checked,
