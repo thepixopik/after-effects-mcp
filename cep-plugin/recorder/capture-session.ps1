@@ -1,115 +1,193 @@
 param(
   [Parameter(Mandatory=$true)][string]$SessionDir,
   [int]$Fps = 60,
-  [string]$AudioDevice = ""
+  [int]$Countdown = 3
 )
 
-$ErrorActionPreference = "Continue"
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-
-if (-not (Test-Path -LiteralPath $SessionDir)) {
-  New-Item -ItemType Directory -Path $SessionDir -Force | Out-Null
-}
+$ErrorActionPreference = "SilentlyContinue"
+New-Item -ItemType Directory -Force -Path $SessionDir | Out-Null
 
 $videoOut   = Join-Path $SessionDir "screen.mp4"
 $motionOut  = Join-Path $SessionDir "motion.json"
 $stopSignal = Join-Path $SessionDir "stop.signal"
 $doneSignal = Join-Path $SessionDir "done.signal"
 
-# Locate ffmpeg
-$ffmpegExe = $null
-$cmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
-if ($cmd) { $ffmpegExe = $cmd.Source }
-if (-not $ffmpegExe) {
-  $wingetPkg = Get-ChildItem -Path "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Filter "ffmpeg.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-  if ($wingetPkg) { $ffmpegExe = $wingetPkg.FullName }
+Remove-Item $stopSignal -Force -ErrorAction SilentlyContinue
+Remove-Item $doneSignal -Force -ErrorAction SilentlyContinue
+
+function Find-Ffmpeg {
+  $cmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
+  if ($cmd) { return $cmd.Source }
+  $wingetRoot = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages"
+  if (Test-Path $wingetRoot) {
+    $found = Get-ChildItem -Path $wingetRoot -Recurse -Filter "ffmpeg.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($found) { return $found.FullName }
+  }
+  foreach ($c in @("C:\ffmpeg\bin\ffmpeg.exe", "C:\Program Files\ffmpeg\bin\ffmpeg.exe")) {
+    if (Test-Path $c) { return $c }
+  }
+  return $null
 }
-if (-not $ffmpegExe -and (Test-Path "C:\ffmpeg\bin\ffmpeg.exe")) {
-  $ffmpegExe = "C:\ffmpeg\bin\ffmpeg.exe"
-}
+
+$ffmpegExe = Find-Ffmpeg
 if (-not $ffmpegExe) {
-  Set-Content -LiteralPath $doneSignal -Value "ERROR:FFMPEG_NOT_FOUND"
+  Set-Content -Path $doneSignal -Value "ERROR:FFMPEG_NOT_FOUND" -Encoding UTF8
   exit 1
 }
+
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
 
 $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $screenW = $bounds.Width
 $screenH = $bounds.Height
 
-# Start clean cursor-free 60fps screen capture
-$psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName = $ffmpegExe
-if ($AudioDevice -and $AudioDevice.Trim().Length -gt 0) {
-  $psi.Arguments = "-y -f gdigrab -framerate $Fps -draw_mouse 0 -i desktop -f dshow -i audio=`"$AudioDevice`" -c:v libx264 -preset ultrafast -crf 18 -pix_fmt yuv420p -c:a aac `"$videoOut`""
-} else {
-  $psi.Arguments = "-y -f gdigrab -framerate $Fps -draw_mouse 0 -i desktop -c:v libx264 -preset ultrafast -crf 18 -pix_fmt yuv420p `"$videoOut`""
+# Floating Pro Recorder Mini-Bar (Top-Right)
+$pill = New-Object System.Windows.Forms.Form
+$pill.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+$pill.TopMost = $true
+$pill.ShowInTaskbar = $false
+$pill.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
+$pill.Width = 270
+$pill.Height = 42
+$pill.Left = [Math]::Max(20, $screenW - 290)
+$pill.Top = 18
+$pill.BackColor = [System.Drawing.Color]::FromArgb(15, 23, 42)
+$pill.Opacity = 0.94
+
+$lbl = New-Object System.Windows.Forms.Label
+$lbl.ForeColor = [System.Drawing.Color]::FromArgb(248, 250, 252)
+$lbl.Font = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Bold)
+$lbl.AutoSize = $false
+$lbl.Left = 12
+$lbl.Top = 0
+$lbl.Width = 158
+$lbl.Height = 42
+$lbl.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+$pill.Controls.Add($lbl)
+
+$stopBtn = New-Object System.Windows.Forms.Button
+$stopBtn.Text = "Stop & Rig"
+$stopBtn.Left = 174
+$stopBtn.Top = 7
+$stopBtn.Width = 86
+$stopBtn.Height = 28
+$stopBtn.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+$stopBtn.FlatAppearance.BorderSize = 0
+$stopBtn.BackColor = [System.Drawing.Color]::FromArgb(239, 68, 68)
+$stopBtn.ForeColor = [System.Drawing.Color]::White
+$stopBtn.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Bold)
+$stopBtn.Add_Click({
+  Set-Content -Path $stopSignal -Value "STOP" -Encoding UTF8
+})
+$pill.Controls.Add($stopBtn)
+$pill.Show()
+
+if ($Countdown -gt 0) {
+  $endWait = [DateTime]::UtcNow.AddSeconds($Countdown)
+  while ([DateTime]::UtcNow -lt $endWait) {
+    $rem = [Math]::Ceiling(($endWait - [DateTime]::UtcNow).TotalSeconds)
+    $lbl.Text = "Starting in ${rem}s... Open App!"
+    [System.Windows.Forms.Application]::DoEvents()
+    Start-Sleep -Milliseconds 60
+  }
 }
-$psi.UseShellExecute = $false
-$psi.RedirectStandardInput = $true
-$psi.CreateNoWindow = $true
 
-$proc = [System.Diagnostics.Process]::Start($psi)
+# Detect GPU ddagrab + NVENC capability for butter-smooth 60fps on 2K/4K
+$filtersTxt = & $ffmpegExe -hide_banner -filters 2>&1 | Out-String
+$encodersTxt = & $ffmpegExe -hide_banner -encoders 2>&1 | Out-String
+$hasDda = $filtersTxt -match "ddagrab"
+$hasNvenc = $encodersTxt -match "h264_nvenc"
+
+function Start-CaptureProcess([bool]$useDda, [bool]$useNvenc) {
+  $vCodec = if ($useNvenc) { "-c:v h264_nvenc -preset p2 -cq 20" } else { "-c:v libx264 -preset ultrafast -tune zerolatency -crf 20 -threads 0" }
+  if ($useDda) {
+    $argsStr = "-y -f lavfi -i `"ddagrab=framerate=$Fps`:draw_mouse=0,hwdownload,format=bgra`" $vCodec -pix_fmt yuv420p `"$videoOut`""
+  } else {
+    $argsStr = "-y -f gdigrab -framerate $Fps -draw_mouse 0 -i desktop $vCodec -pix_fmt yuv420p `"$videoOut`""
+  }
+  $pInfo = New-Object System.Diagnostics.ProcessStartInfo
+  $pInfo.FileName = $ffmpegExe
+  $pInfo.Arguments = $argsStr
+  $pInfo.RedirectStandardInput = $true
+  $pInfo.UseShellExecute = $false
+  $pInfo.CreateNoWindow = $true
+  $proc = New-Object System.Diagnostics.Process
+  $proc.StartInfo = $pInfo
+  $proc.Start() | Out-Null
+  return $proc
+}
+
+$ffProc = Start-CaptureProcess -useDda $hasDda -useNvenc $hasNvenc
+Start-Sleep -Milliseconds 350
+if ($ffProc.HasExited) {
+  $ffProc = Start-CaptureProcess -useDda $false -useNvenc $false
+}
+
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
-
 $samples = New-Object System.Collections.Generic.List[object]
 $clicks  = New-Object System.Collections.Generic.List[object]
-$lastX = -1
-$lastY = -1
 $wasLeftDown = $false
 $wasRightDown = $false
 
-while (-not (Test-Path -LiteralPath $stopSignal)) {
-  if ($proc.HasExited) { break }
+while (-not $ffProc.HasExited) {
+  [System.Windows.Forms.Application]::DoEvents()
+  if (Test-Path $stopSignal) { break }
 
   $t = [Math]::Round($sw.Elapsed.TotalSeconds, 3)
+  $sec = [int][Math]::Floor($t)
+  $mm = "{0:D2}" -f [int][Math]::Floor($sec / 60)
+  $ss = "{0:D2}" -f ($sec % 60)
+  $lbl.Text = "REC $mm`:$ss • 60 FPS"
+
   $pos = [System.Windows.Forms.Cursor]::Position
   $btns = [System.Windows.Forms.Control]::MouseButtons
+  $leftDown  = ($btns -band [System.Windows.Forms.MouseButtons]::Left) -ne 0
+  $rightDown = ($btns -band [System.Windows.Forms.MouseButtons]::Right) -ne 0
 
-  if ($pos.X -ne $lastX -or $pos.Y -ne $lastY) {
-    $samples.Add(@{ t = $t; x = $pos.X; y = $pos.Y })
-    $lastX = $pos.X
-    $lastY = $pos.Y
-  }
+  $samples.Add(@{ t = $t; x = $pos.X; y = $pos.Y })
 
-  $leftDown = (($btns -band [System.Windows.Forms.MouseButtons]::Left) -ne 0)
   if ($leftDown -and -not $wasLeftDown) {
     $clicks.Add(@{ t = $t; x = $pos.X; y = $pos.Y; button = "left" })
   }
-  $wasLeftDown = $leftDown
-
-  $rightDown = (($btns -band [System.Windows.Forms.MouseButtons]::Right) -ne 0)
   if ($rightDown -and -not $wasRightDown) {
     $clicks.Add(@{ t = $t; x = $pos.X; y = $pos.Y; button = "right" })
   }
+  $wasLeftDown = $leftDown
   $wasRightDown = $rightDown
 
   Start-Sleep -Milliseconds 16
 }
 
-$durationSec = [Math]::Round($sw.Elapsed.TotalSeconds, 3)
+$lbl.Text = "Saving 60fps MP4..."
+[System.Windows.Forms.Application]::DoEvents()
 
-# Gracefully finalize MP4 container
-if (-not $proc.HasExited) {
-  try {
-    $proc.StandardInput.WriteLine("q")
-    $proc.StandardInput.Flush()
-    $proc.WaitForExit(5000) | Out-Null
-  } catch {}
-  if (-not $proc.HasExited) {
-    try { $proc.Kill() } catch {}
+try {
+  if (-not $ffProc.HasExited) {
+    $ffProc.StandardInput.WriteLine("q")
+    $ffProc.StandardInput.Flush()
+    $ffProc.WaitForExit(6000) | Out-Null
   }
-}
+  if (-not $ffProc.HasExited) { $ffProc.Kill() }
+} catch {}
 
-$telemetry = @{
-  version      = "0.1.0"
+$pill.Close()
+$pill.Dispose()
+
+$payload = @{
+  version      = "1.0"
   fps          = $Fps
-  duration     = $durationSec
   screenWidth  = $screenW
   screenHeight = $screenH
+  duration     = [Math]::Round($sw.Elapsed.TotalSeconds, 3)
   samples      = $samples
   clicks       = $clicks
 }
 
-$telemetry | ConvertTo-Json -Depth 5 -Compress | Set-Content -LiteralPath $motionOut -Encoding UTF8
-Set-Content -LiteralPath $doneSignal -Value "OK" -Encoding UTF8
+$payload | ConvertTo-Json -Depth 5 -Compress | Set-Content -Path $motionOut -Encoding UTF8
+Set-Content -Path $doneSignal -Value "OK" -Encoding UTF8
+
+try {
+  $wsh = New-Object -ComObject WScript.Shell
+  $wsh.AppActivate("Adobe After Effects") | Out-Null
+} catch {}
