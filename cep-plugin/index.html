@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Pixopik Motion Studio</title>
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="brand">
+        <span class="badge-logo">PX</span>
+        <div>
+          <div class="title">Pixopik Motion Studio</div>
+          <div class="subtitle">AE Video &amp; Screen Studio • v0.1</div>
+        </div>
+      </div>
+      <div id="statusBadge" class="status disconnected">
+        <span class="dot"></span>
+        <span id="statusText">Connecting...</span>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="card-title">1. Advanced Motion Screen Recorder</div>
+      <div class="field-row">
+        <label>Format</label>
+        <select id="aspectSelect">
+          <option value="youtube_16_9">YouTube / SaaS 16:9 (1920x1080)</option>
+          <option value="shorts_9_16">YouTube Shorts 9:16 (1080x1920)</option>
+          <option value="square_1_1">Square Demo 1:1 (1080x1080)</option>
+        </select>
+      </div>
+      <div class="toggles">
+        <label><input type="checkbox" id="chkAutoZoom" checked /> Auto Click-Zoom</label>
+        <label><input type="checkbox" id="chkVectorCursor" checked /> Vector Cursor</label>
+        <label><input type="checkbox" id="chkRipples" checked /> Click Ripples</label>
+        <label><input type="checkbox" id="chkMic" /> Mic Audio</label>
+      </div>
+      <div class="btn-row">
+        <button id="btnRecord" class="btn btn-record">● Start Advanced Record</button>
+        <button id="btnStop" class="btn btn-stop hidden">■ Stop &amp; Auto-Rig</button>
+      </div>
+      <div id="recTimer" class="timer hidden">00:00 • Capturing 60fps + Motion...</div>
+      <div class="btn-row sub-actions">
+        <button id="btnRigLatest" class="btn btn-secondary">✨ Rig Latest Session</button>
+        <button id="btnRigFile" class="btn btn-secondary">📂 Import MP4</button>
+      </div>
+      <div id="ffmpegBar" class="ffmpeg-bar hidden">
+        <span>FFmpeg missing for 60fps capture</span>
+        <button id="btnInstallFfmpeg" class="btn-mini">⚡ Auto-Install</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-title">2. Quick SaaS Edit &amp; Polish</div>
+      <div class="grid-btns">
+        <button id="btnAddZoom" class="btn btn-chip">🔍 + Smart Zoom</button>
+        <button id="btnSpotlight" class="btn btn-chip">💡 + Spotlight</button>
+        <button id="btnBlur" class="btn btn-chip">🔒 + Privacy Blur</button>
+        <button id="btnCallout" class="btn btn-chip">💬 + SaaS Callout</button>
+        <button id="btnShorts" class="btn btn-chip">📱 Convert 9:16</button>
+        <button id="btn3dTilt" class="btn btn-chip">🎲 3D SaaS Tilt</button>
+      </div>
+    </section>
+
+    <section class="card compact">
+      <div class="ws-row">
+        <input id="wsUrl" type="text" value="wss://after-effects-mcp.goutamboronew.workers.dev/ws" />
+        <button id="btnReconnect" class="btn-mini">Reconnect</button>
+      </div>
+    </section>
+
+    <section class="log-box">
+      <div class="log-header">
+        <span>Live Activity</span>
+        <button id="btnClearLog" class="link-btn">Clear</button>
+      </div>
+      <div id="logList" class="log-list"></div>
+    </section>
+  </div>
+
+  <script src="./js/panel.js"></script>
+</body>
+</html>
