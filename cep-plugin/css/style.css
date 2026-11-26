@@ -9,14 +9,13 @@ body {
   background: #14151a;
   color: #f1f5f9;
   font-size: 12px;
-  height: 100vh;
-  overflow: hidden;
+  min-height: 100vh;
+  overflow-y: auto;
 }
 
 .app {
   display: flex;
   flex-direction: column;
-  height: 100vh;
   padding: 10px;
   gap: 8px;
 }
@@ -57,6 +56,16 @@ body {
 .subtitle {
   font-size: 10px;
   color: #94a3b8;
+}
+
+.quick-banner {
+  background: #1e2230;
+  border: 1px solid #31374f;
+  color: #c7d2fe;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .status {
@@ -206,8 +215,9 @@ select, input[type="text"] {
   font-size: 11px;
   font-weight: 600;
   color: #fca5a5;
-  background: rgba(239, 68, 68, 0.14);
-  padding: 4px;
+  background: rgba(239, 68, 68, 0.18);
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  padding: 5px;
   border-radius: 5px;
 }
 
@@ -240,8 +250,7 @@ select, input[type="text"] {
 }
 
 .log-box {
-  flex: 1;
-  min-height: 95px;
+  height: 120px;
   background: #101217;
   border: 1px solid #242836;
   border-radius: 8px;

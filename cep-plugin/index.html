@@ -12,7 +12,7 @@
         <span class="badge-logo">PX</span>
         <div>
           <div class="title">Pixopik Motion Studio</div>
-          <div class="subtitle">AE Video &amp; Screen Studio • v0.1</div>
+          <div class="subtitle">AE Video &amp; Screen Studio • v0.2</div>
         </div>
       </div>
       <div id="statusBadge" class="status disconnected">
@@ -20,6 +20,8 @@
         <span id="statusText">Connecting...</span>
       </div>
     </header>
+
+    <div id="quickBanner" class="quick-banner">Ready • Click Start Record or Import MP4</div>
 
     <section class="card">
       <div class="card-title">1. Advanced Motion Screen Recorder</div>
@@ -47,7 +49,7 @@
         <button id="btnRigFile" class="btn btn-secondary">📂 Import MP4</button>
       </div>
       <div id="ffmpegBar" class="ffmpeg-bar hidden">
-        <span>FFmpeg missing for 60fps capture</span>
+        <span>FFmpeg needed for 60fps capture</span>
         <button id="btnInstallFfmpeg" class="btn-mini">⚡ Auto-Install</button>
       </div>
     </section>
@@ -55,6 +57,7 @@
     <section class="card">
       <div class="card-title">2. Quick SaaS Edit &amp; Polish</div>
       <div class="grid-btns">
+        <button id="btnNewComp" class="btn btn-chip">🎬 + Demo Comp</button>
         <button id="btnAddZoom" class="btn btn-chip">🔍 + Smart Zoom</button>
         <button id="btnSpotlight" class="btn btn-chip">💡 + Spotlight</button>
         <button id="btnBlur" class="btn btn-chip">🔒 + Privacy Blur</button>
