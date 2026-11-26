@@ -26,41 +26,16 @@
     if (fileObj.open("w")) { fileObj.write(chunks.join("")); fileObj.close(); }
   }
 
-  function ensureSoftTapWav(pathStr) {
+  function ensureBalancedClickWav(pathStr) {
     var f = new File(pathStr);
     if (f.exists && f.length > 500) return f;
-    var sr = 44100, n = Math.floor(sr * 0.034), arr = [];
+    var sr = 44100, dur = 0.052, n = Math.floor(sr * dur), arr = [];
     for (var i = 0; i < n; i++) {
       var t = i / sr;
-      var tap = Math.sin(2 * Math.PI * (195 + 520 * Math.exp(-t * 240)) * t) * (1.0 - Math.exp(-t * 2200)) * Math.exp(-t * 215);
-      arr.push(tap * 0.26);
-    }
-    writeWavMono16(f, sr, arr);
-    return f;
-  }
-
-  function ensureSilkyAirWav(pathStr) {
-    var f = new File(pathStr);
-    if (f.exists && f.length > 1000) return f;
-    var sr = 44100, dur = 0.26, n = Math.floor(sr * dur), arr = [];
-    var s1 = 98765, lp1 = 0, lp2 = 0, lp3 = 0, hpIn = 0, hpOut = 0;
-    for (var i = 0; i < n; i++) {
-      var u = i / n;
-      var env = 0.5 * (1.0 - Math.cos(2 * Math.PI * u));
-      env = env * env;
-      s1 = (s1 * 1664525 + 1013904223) & 0x7fffffff;
-      var r1 = (s1 / 1073741824.0) - 1.0;
-      s1 = (s1 * 1664525 + 1013904223) & 0x7fffffff;
-      var r2 = (s1 / 1073741824.0) - 1.0;
-      var nVal = (r1 + r2) * 0.5;
-      hpOut = 0.975 * (hpOut + nVal - hpIn);
-      hpIn = nVal;
-      var rc = (2 * Math.PI * (280 + 500 * env) / sr);
-      var a = rc / (1.0 + rc);
-      lp1 += a * (hpOut - lp1);
-      lp2 += a * (lp1 - lp2);
-      lp3 += a * (lp2 - lp3);
-      arr.push(lp3 * env * 0.22);
+      var snap = Math.exp(-t * 440) * 0.52;
+      var thock = Math.sin(2 * Math.PI * (250 + 1320 * Math.exp(-t * 165)) * t) * Math.exp(-t * 120) * 0.65;
+      var body = Math.sin(2 * Math.PI * 210 * t) * Math.exp(-t * 90) * 0.30;
+      arr.push((snap + thock + body) * 0.56);
     }
     writeWavMono16(f, sr, arr);
     return f;
@@ -251,7 +226,7 @@
     var vFile = new File(args.videoPath);
     if (!vFile.exists) throw new Error("Video not found: " + args.videoPath);
 
-    app.beginUndoGroup("Pixopik Agency Studio Rig v2.1");
+    app.beginUndoGroup("Pixopik Agency Studio Rig v2.2");
     try {
       var footage = app.project.importFile(new ImportOptions(vFile));
       var preset = args.aspectPreset || "youtube_16_9";
@@ -370,28 +345,20 @@
       easeProp(camPos, 82); easeProp(camScl, 82);
       if (swivel) easeProp(swivel, 78); if (tilt) easeProp(tilt, 78);
 
-      /* Refined 44.1kHz Soft Trackpad Tap (-8dB) + Separate Silky Air Brush (-13dB) */
+      /* Clean Balanced Tactile Mouse Click SFX Only (-2.5 dB, no artificial whoosh) */
       try {
         var tmp = Folder.temp.fsName.replace(/\\/g, "/");
-        var tapItem = app.project.importFile(new ImportOptions(ensureSoftTapWav(tmp + "/px_soft_tap_v2.wav")));
-        var airItem = app.project.importFile(new ImportOptions(ensureSilkyAirWav(tmp + "/px_silky_air_v2.wav")));
-
-        var clickComp = app.project.items.addComp("07A_Soft_Click_SFX_" + comp.name.slice(-5), 100, 100, 1, dur, 60);
-        for (var sc = 0; sc < clicks.length; sc++) { var cl = clickComp.layers.add(tapItem); cl.startTime = Math.max(0, clicks[sc].t - 0.004); }
-        var clickLyr = comp.layers.add(clickComp);
-        clickLyr.name = "07A_Soft_Click_SFX"; clickLyr.enabled = false; clickLyr.audioEnabled = true;
-        try { clickLyr.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([-8, -8]); } catch (_ea1) {}
-
-        var airComp = app.project.items.addComp("07B_Subtle_Air_SFX_" + comp.name.slice(-5), 100, 100, 1, dur, 60);
-        var lastAirT = -10;
-        for (var zc = 0; zc < clicks.length; zc++) {
-          if (clicks[zc].t > 1.1 && (clicks[zc].t - lastAirT) > 5.5) {
-            var al = airComp.layers.add(airItem); al.startTime = Math.max(0, clicks[zc].t - 0.35); lastAirT = clicks[zc].t;
-          }
+        var clickItem = app.project.importFile(new ImportOptions(ensureBalancedClickWav(tmp + "/px_balanced_click_v3.wav")));
+        var clickComp = app.project.items.addComp("07_Mouse_Click_SFX_" + comp.name.slice(-5), 100, 100, 1, dur, 60);
+        for (var sc = 0; sc < clicks.length; sc++) {
+          var cl = clickComp.layers.add(clickItem);
+          cl.startTime = Math.max(0, clicks[sc].t - 0.004);
         }
-        var airLyr = comp.layers.add(airComp);
-        airLyr.name = "07B_Subtle_Air_SFX"; airLyr.enabled = false; airLyr.audioEnabled = true;
-        try { airLyr.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([-13, -13]); } catch (_ea2) {}
+        var clickLyr = comp.layers.add(clickComp);
+        clickLyr.name = "07_Mouse_Click_SFX";
+        clickLyr.enabled = false;
+        clickLyr.audioEnabled = true;
+        try { clickLyr.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([-2.5, -2.5]); } catch (_ea) {}
       } catch (_sfxErr) {}
 
       comp.openInViewer();
