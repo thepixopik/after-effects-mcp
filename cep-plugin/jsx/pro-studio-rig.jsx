@@ -26,34 +26,41 @@
     if (fileObj.open("w")) { fileObj.write(chunks.join("")); fileObj.close(); }
   }
 
-  function ensureClickWav(pathStr) {
+  function ensureSoftTapWav(pathStr) {
     var f = new File(pathStr);
     if (f.exists && f.length > 500) return f;
-    var sr = 22050, n = Math.floor(sr * 0.055), arr = [];
+    var sr = 44100, n = Math.floor(sr * 0.034), arr = [];
     for (var i = 0; i < n; i++) {
       var t = i / sr;
-      var snap = Math.exp(-t * 420) * 0.75;
-      var thock = Math.sin(2 * Math.PI * (240 + 1350 * Math.exp(-t * 160)) * t) * Math.exp(-t * 115) * 0.85;
-      var body = Math.sin(2 * Math.PI * 190 * t) * Math.exp(-t * 85) * 0.4;
-      arr.push((snap + thock + body) * 0.85);
+      var tap = Math.sin(2 * Math.PI * (195 + 520 * Math.exp(-t * 240)) * t) * (1.0 - Math.exp(-t * 2200)) * Math.exp(-t * 215);
+      arr.push(tap * 0.26);
     }
     writeWavMono16(f, sr, arr);
     return f;
   }
 
-  function ensureWhooshWav(pathStr) {
+  function ensureSilkyAirWav(pathStr) {
     var f = new File(pathStr);
     if (f.exists && f.length > 1000) return f;
-    var sr = 22050, dur = 0.34, n = Math.floor(sr * dur), arr = [], seed = 12345, prev = 0;
+    var sr = 44100, dur = 0.26, n = Math.floor(sr * dur), arr = [];
+    var s1 = 98765, lp1 = 0, lp2 = 0, lp3 = 0, hpIn = 0, hpOut = 0;
     for (var i = 0; i < n; i++) {
-      var t = i / sr;
-      var env = Math.sin(Math.PI * (t / dur));
-      env = env * env * 0.38;
-      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-      var white = (seed / 1073741824.0) - 1.0;
-      prev = prev + (0.08 + 0.22 * Math.sin(Math.PI * (t / dur))) * (white - prev);
-      var sub = Math.sin(2 * Math.PI * (95 + 110 * (t / dur)) * t) * env * 0.45;
-      arr.push(prev * env + sub);
+      var u = i / n;
+      var env = 0.5 * (1.0 - Math.cos(2 * Math.PI * u));
+      env = env * env;
+      s1 = (s1 * 1664525 + 1013904223) & 0x7fffffff;
+      var r1 = (s1 / 1073741824.0) - 1.0;
+      s1 = (s1 * 1664525 + 1013904223) & 0x7fffffff;
+      var r2 = (s1 / 1073741824.0) - 1.0;
+      var nVal = (r1 + r2) * 0.5;
+      hpOut = 0.975 * (hpOut + nVal - hpIn);
+      hpIn = nVal;
+      var rc = (2 * Math.PI * (280 + 500 * env) / sr);
+      var a = rc / (1.0 + rc);
+      lp1 += a * (hpOut - lp1);
+      lp2 += a * (lp1 - lp2);
+      lp3 += a * (lp2 - lp3);
+      arr.push(lp3 * env * 0.22);
     }
     writeWavMono16(f, sr, arr);
     return f;
@@ -244,7 +251,7 @@
     var vFile = new File(args.videoPath);
     if (!vFile.exists) throw new Error("Video not found: " + args.videoPath);
 
-    app.beginUndoGroup("Pixopik Agency Studio Rig v2.0");
+    app.beginUndoGroup("Pixopik Agency Studio Rig v2.1");
     try {
       var footage = app.project.importFile(new ImportOptions(vFile));
       var preset = args.aspectPreset || "youtube_16_9";
@@ -310,7 +317,6 @@
         cur.moveToBeginning();
       }
 
-      /* Agency 3D Cinema Director + Exact Non-Averaged Click-to-Click Camera Glide */
       var dirAdj = comp.layers.addSolid([1, 1, 1], "06_Cinema_3D_Director", compW, compH, 1);
       dirAdj.adjustmentLayer = true;
       dirAdj.moveToBeginning();
@@ -324,8 +330,7 @@
       if (swivel && tilt) { swivel.setValueAtTime(0, -8); tilt.setValueAtTime(0, 6); swivel.setValueAtTime(0.95, 0); tilt.setValueAtTime(0.95, 0); }
 
       var zoomPct = args.zoomPercent || (preset === "shorts_9_16" ? 215 : 178);
-      var z = zoomPct / 100;
-      var whooshTimes = [0.05], zoomClusters = 0;
+      var z = zoomPct / 100, zoomClusters = 0;
 
       if (args.autoZoom !== false && clicks.length > 0) {
         var idx = 0;
@@ -334,7 +339,6 @@
           var enterT = Math.max(1.0, clicks[idx].t - 0.45);
           camPos.setValueAtTime(enterT, [cx, cy]); camScl.setValueAtTime(enterT, [100, 100]);
           if (swivel && tilt) { swivel.setValueAtTime(enterT, 0); tilt.setValueAtTime(enterT, 0); }
-          whooshTimes.push(enterT);
           zoomClusters++;
 
           var lastHold = clicks[idx].t;
@@ -361,24 +365,33 @@
           var exitT = Math.min(dur - 0.1, lastHold + 0.52);
           camPos.setValueAtTime(exitT, [cx, cy]); camScl.setValueAtTime(exitT, [100, 100]);
           if (swivel && tilt) { swivel.setValueAtTime(exitT, 0); tilt.setValueAtTime(exitT, 0); }
-          whooshTimes.push(lastHold);
         }
       }
       easeProp(camPos, 82); easeProp(camScl, 82);
       if (swivel) easeProp(swivel, 78); if (tilt) easeProp(tilt, 78);
 
-      /* Synthesize & Sync Studio Click + Whoosh Foley SFX */
+      /* Refined 44.1kHz Soft Trackpad Tap (-8dB) + Separate Silky Air Brush (-13dB) */
       try {
         var tmp = Folder.temp.fsName.replace(/\\/g, "/");
-        var cItem = app.project.importFile(new ImportOptions(ensureClickWav(tmp + "/pixopik_tactile_click.wav")));
-        var wItem = app.project.importFile(new ImportOptions(ensureWhooshWav(tmp + "/pixopik_cinema_whoosh.wav")));
-        var sfxComp = app.project.items.addComp("07_Studio_SFX_Mix_" + comp.name.slice(-6), 100, 100, 1, dur, 60);
-        for (var sc = 0; sc < clicks.length; sc++) { var cl = sfxComp.layers.add(cItem); cl.startTime = Math.max(0, clicks[sc].t - 0.005); }
-        for (var sw = 0; sw < whooshTimes.length; sw++) { var wl = sfxComp.layers.add(wItem); wl.startTime = Math.max(0, whooshTimes[sw]); }
-        var sfxLayer = comp.layers.add(sfxComp);
-        sfxLayer.name = "07_Studio_SFX_Mix";
-        sfxLayer.enabled = false;
-        sfxLayer.audioEnabled = true;
+        var tapItem = app.project.importFile(new ImportOptions(ensureSoftTapWav(tmp + "/px_soft_tap_v2.wav")));
+        var airItem = app.project.importFile(new ImportOptions(ensureSilkyAirWav(tmp + "/px_silky_air_v2.wav")));
+
+        var clickComp = app.project.items.addComp("07A_Soft_Click_SFX_" + comp.name.slice(-5), 100, 100, 1, dur, 60);
+        for (var sc = 0; sc < clicks.length; sc++) { var cl = clickComp.layers.add(tapItem); cl.startTime = Math.max(0, clicks[sc].t - 0.004); }
+        var clickLyr = comp.layers.add(clickComp);
+        clickLyr.name = "07A_Soft_Click_SFX"; clickLyr.enabled = false; clickLyr.audioEnabled = true;
+        try { clickLyr.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([-8, -8]); } catch (_ea1) {}
+
+        var airComp = app.project.items.addComp("07B_Subtle_Air_SFX_" + comp.name.slice(-5), 100, 100, 1, dur, 60);
+        var lastAirT = -10;
+        for (var zc = 0; zc < clicks.length; zc++) {
+          if (clicks[zc].t > 1.1 && (clicks[zc].t - lastAirT) > 5.5) {
+            var al = airComp.layers.add(airItem); al.startTime = Math.max(0, clicks[zc].t - 0.35); lastAirT = clicks[zc].t;
+          }
+        }
+        var airLyr = comp.layers.add(airComp);
+        airLyr.name = "07B_Subtle_Air_SFX"; airLyr.enabled = false; airLyr.audioEnabled = true;
+        try { airLyr.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([-13, -13]); } catch (_ea2) {}
       } catch (_sfxErr) {}
 
       comp.openInViewer();
