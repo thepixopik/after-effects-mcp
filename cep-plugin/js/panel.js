@@ -67,6 +67,7 @@
       var root = getExtensionRoot().replace(/\\/g, "/");
       var boot = 'if (typeof PixopikAE === "undefined") { $.evalFile("' + root + '/jsx/host.jsx"); } ' +
                  'if (typeof PixopikAE !== "undefined" && !PixopikAE._addonLoaded) { $.evalFile("' + root + '/jsx/recorder-addon.jsx"); } ' +
+                 'if (typeof PixopikAE !== "undefined" && !PixopikAE._proRigLoaded) { $.evalFile("' + root + '/jsx/pro-studio-rig.jsx"); } ' +
                  '"OK"';
       window.__adobe_cep__.evalScript(boot, function () {
         hostLoaded = true;
@@ -89,13 +90,28 @@
     });
   }
 
+  function readUiRigOptions() {
+    var wp = document.getElementById("wallpaperSelect");
+    var fs = document.getElementById("frameStyleSelect");
+    var mb = document.getElementById("chkMotionBlur");
+    return {
+      aspectPreset: document.getElementById("aspectSelect").value,
+      wallpaper: wp ? wp.value : "cosmic_indigo",
+      frameStyle: fs ? fs.value : "macos_glass",
+      autoZoom: document.getElementById("chkAutoZoom").checked,
+      vectorCursor: document.getElementById("chkVectorCursor").checked,
+      clickRipples: document.getElementById("chkRipples").checked,
+      motionBlur: mb ? mb.checked : true
+    };
+  }
+
   function processMotionTelemetry(motionData) {
     if (!motionData || !Array.isArray(motionData.samples) || motionData.samples.length === 0) {
       return { cursorKeys: [], zoomSegments: [], clicks: [] };
     }
     var raw = motionData.samples;
     var smoothed = [];
-    var sx = raw[0].x, sy = raw[0].y, alpha = 0.32;
+    var sx = raw[0].x, sy = raw[0].y, alpha = 0.28;
 
     for (var i = 0; i < raw.length; i++) {
       sx = sx + alpha * (raw[i].x - sx);
@@ -103,10 +119,10 @@
       smoothed.push({ t: raw[i].t, x: Math.round(sx), y: Math.round(sy) });
     }
 
-    var step = Math.max(1, Math.ceil(smoothed.length / 220));
+    var step = Math.max(1, Math.ceil(smoothed.length / 240));
     var cursorKeys = [], prevT = -1;
     for (var j = 0; j < smoothed.length; j += step) {
-      if (smoothed[j].t - prevT >= 0.04) {
+      if (smoothed[j].t - prevT >= 0.035) {
         cursorKeys.push(smoothed[j]);
         prevT = smoothed[j].t;
       }
@@ -119,14 +135,14 @@
     for (var c = 0; c < clicks.length; c++) {
       var clk = clicks[c];
       var prevSeg = zoomSegments[zoomSegments.length - 1];
-      if (prevSeg && clk.t - prevSeg.endTime < 1.8) {
-        prevSeg.endTime = clk.t + 1.3;
+      if (prevSeg && clk.t - prevSeg.endTime < 1.9) {
+        prevSeg.endTime = clk.t + 1.4;
         prevSeg.x = Math.round((prevSeg.x + clk.x) / 2);
         prevSeg.y = Math.round((prevSeg.y + clk.y) / 2);
       } else {
         zoomSegments.push({
-          startTime: Math.max(0.1, Number((clk.t - 0.35).toFixed(2))),
-          endTime: Number((clk.t + 1.35).toFixed(2)),
+          startTime: Math.max(0.15, Number((clk.t - 0.35).toFixed(2))),
+          endTime: Number((clk.t + 1.45).toFixed(2)),
           x: clk.x,
           y: clk.y
         });
@@ -144,19 +160,21 @@
   }
 
   async function handleAutoRig(args) {
+    var uiDefaults = readUiRigOptions();
+    var merged = Object.assign({}, uiDefaults, args || {});
     var info = await callHost("resolve_recording_session", {
-      sessionFolder: args.sessionFolder || "latest",
-      videoPath: args.videoPath || "",
-      motionJsonPath: args.motionJsonPath || ""
+      sessionFolder: merged.sessionFolder || "latest",
+      videoPath: merged.videoPath || "",
+      motionJsonPath: merged.motionJsonPath || ""
     });
     var processedMotion = null;
     if (info.motionText) {
       try { processedMotion = processMotionTelemetry(JSON.parse(info.motionText)); } catch (_e) {}
     }
-    var payload = Object.assign({}, args, { videoPath: info.videoPath, motion: processedMotion });
-    log("Auto-rigging " + info.videoPath.split("/").pop() + "...");
+    var payload = Object.assign({}, merged, { videoPath: info.videoPath, motion: processedMotion });
+    log("Pro-rigging " + info.videoPath.split("/").pop() + "...");
     var res = await callHost("import_and_autorig_recording", payload);
-    log("Rig ready: " + res.compName);
+    log("Pro Studio Ready: " + res.compName);
     return res;
   }
 
@@ -180,9 +198,9 @@
     ws = new WebSocket(wsInput.value.trim());
 
     ws.onopen = function () {
-      setStatus("connected", "Connected & Ready!");
-      log("Connected to Cloudflare! Ready for AI Video commands.");
-      ws.send(JSON.stringify({ type: "hello", app: "after-effects", version: "0.2.1" }));
+      setStatus("connected", "Pro v1.0 Live");
+      log("Connected! Pro Screen Studio v1.0 Active.");
+      ws.send(JSON.stringify({ type: "hello", app: "after-effects", version: "1.0.0" }));
       clearInterval(pingTimer);
       pingTimer = setInterval(function () {
         if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "ping" }));
@@ -212,9 +230,21 @@
     };
   }
 
+  function finishAndRigSession() {
+    clearInterval(recTimerInt);
+    document.getElementById("btnStop").classList.add("hidden");
+    document.getElementById("btnRecord").classList.remove("hidden");
+    document.getElementById("recTimer").classList.add("hidden");
+    handleAutoRig({ sessionFolder: String(activeSessionDir).replace(/\\/g, "/") })
+      .catch(function (e) { log("Rig error: " + e.message); });
+  }
+
   document.getElementById("btnRecord").onclick = async function () {
     try {
-      log("Starting 60fps screen + motion recorder...");
+      var cdEl = document.getElementById("countdownSelect");
+      var cdSec = cdEl ? parseInt(cdEl.value, 10) : 3;
+      log("Launching 60fps Pro Recorder (" + cdSec + "s countdown)...");
+
       var cp = getNode("child_process"), fs = getNode("fs"), path = getNode("path"), os = getNode("os");
       if (cp && fs && path && os) {
         var recRoot = path.join(os.homedir(), "Videos", "PixopikRecordings");
@@ -223,31 +253,44 @@
         activeSessionDir = path.join(recRoot, "rec_" + stamp);
         fs.mkdirSync(activeSessionDir, { recursive: true });
         var psScript = path.join(getExtensionRoot(), "recorder", "capture-session.ps1");
-        cp.spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", psScript, "-SessionDir", activeSessionDir, "-Fps", "60"], { windowsHide: true });
+        cp.spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", psScript, "-SessionDir", activeSessionDir, "-Fps", "60", "-Countdown", String(cdSec)], { windowsHide: true });
       } else {
         var startRes = await callHost("start_screen_recorder", { extRoot: getExtensionRoot() });
         activeSessionDir = startRes.sessionDir;
       }
+
       document.getElementById("btnRecord").classList.add("hidden");
       document.getElementById("btnStop").classList.remove("hidden");
       var timerEl = document.getElementById("recTimer");
       timerEl.classList.remove("hidden");
       recStartMs = Date.now();
-      log("RECORDING LIVE! Record at least 3-5s & click buttons...");
-      recTimerInt = setInterval(function () {
+      log("Switch to Chrome/App! Click floating Stop & Rig pill when done.");
+
+      recTimerInt = setInterval(async function () {
         var sec = Math.floor((Date.now() - recStartMs) / 1000);
         var mm = ("0" + Math.floor(sec / 60)).slice(-2);
         var ss = ("0" + (sec % 60)).slice(-2);
-        timerEl.textContent = mm + ":" + ss + " • Recording 60fps + Motion...";
-      }, 500);
+        timerEl.textContent = mm + ":" + ss + " • Floating Stop Pill Active";
+        try {
+          var st = await callHost("check_recorder_done", { sessionDir: String(activeSessionDir).replace(/\\/g, "/") });
+          if (st && st.done) {
+            if (st.status && st.status.indexOf("FFMPEG_NOT_FOUND") !== -1) {
+              clearInterval(recTimerInt);
+              document.getElementById("ffmpegBar").classList.remove("hidden");
+              log("FFmpeg missing — click Auto-Install!");
+              return;
+            }
+            finishAndRigSession();
+          }
+        } catch (_e) {}
+      }, 800);
     } catch (err) {
       log("Record error: " + err.message);
     }
   };
 
   document.getElementById("btnStop").onclick = async function () {
-    clearInterval(recTimerInt);
-    document.getElementById("recTimer").textContent = "Finalizing MP4 & Auto-Rigging...";
+    document.getElementById("recTimer").textContent = "Finalizing 60fps MP4 & Rigging...";
     try {
       var fs = getNode("fs"), path = getNode("path");
       if (fs && path && activeSessionDir) {
@@ -255,65 +298,32 @@
       } else {
         await callHost("stop_screen_recorder", { sessionDir: activeSessionDir });
       }
-      var checks = 0;
-      var poll = setInterval(async function () {
-        checks++;
-        try {
-          var st = await callHost("check_recorder_done", { sessionDir: String(activeSessionDir).replace(/\\/g, "/") });
-          if (st.done || checks > 24) {
-            clearInterval(poll);
-            document.getElementById("btnStop").classList.add("hidden");
-            document.getElementById("btnRecord").classList.remove("hidden");
-            document.getElementById("recTimer").classList.add("hidden");
-            if (st.status && st.status.indexOf("FFMPEG_NOT_FOUND") !== -1) {
-              var bar = document.getElementById("ffmpegBar");
-              if (bar) bar.classList.remove("hidden");
-              log("FFmpeg missing — click Auto-Install!");
-              return;
-            }
-            await handleAutoRig({
-              sessionFolder: String(activeSessionDir).replace(/\\/g, "/"),
-              aspectPreset: document.getElementById("aspectSelect").value,
-              autoZoom: document.getElementById("chkAutoZoom").checked,
-              vectorCursor: document.getElementById("chkVectorCursor").checked,
-              clickRipples: document.getElementById("chkRipples").checked
-            });
-          }
-        } catch (e) {
-          clearInterval(poll);
-          log("Stop error: " + e.message);
-        }
-      }, 500);
     } catch (err) {
       log("Stop error: " + err.message);
     }
   };
 
   document.getElementById("btnRigLatest").onclick = function () {
-    handleAutoRig({
-      sessionFolder: "latest",
-      aspectPreset: document.getElementById("aspectSelect").value,
-      autoZoom: document.getElementById("chkAutoZoom").checked,
-      vectorCursor: document.getElementById("chkVectorCursor").checked,
-      clickRipples: document.getElementById("chkRipples").checked
-    }).catch(function (e) { log("Error: " + e.message); });
+    handleAutoRig({ sessionFolder: "latest" }).catch(function (e) { log("Error: " + e.message); });
   };
 
   document.getElementById("btnRigFile").onclick = async function () {
     try {
       var pick = await callHost("pick_video_file", {});
       if (pick && pick.videoPath) {
-        await handleAutoRig({
-          videoPath: pick.videoPath,
-          motionJsonPath: pick.motionJsonPath || "",
-          aspectPreset: document.getElementById("aspectSelect").value,
-          autoZoom: document.getElementById("chkAutoZoom").checked,
-          vectorCursor: document.getElementById("chkVectorCursor").checked,
-          clickRipples: document.getElementById("chkRipples").checked
-        });
+        await handleAutoRig({ videoPath: pick.videoPath, motionJsonPath: pick.motionJsonPath || "" });
       }
     } catch (e) { log("Import error: " + e.message); }
   };
+
+  var btnUp = document.getElementById("btnUpgradeComp");
+  if (btnUp) {
+    btnUp.onclick = function () {
+      var wp = document.getElementById("wallpaperSelect");
+      callHost("upgrade_active_comp", { wallpaper: wp ? wp.value : "cosmic_indigo" })
+        .then(function (r) { log("Upgraded comp: " + r.compName); }).catch(function (e) { log(e.message); });
+    };
+  }
 
   var btnFfmpeg = document.getElementById("btnInstallFfmpeg");
   if (btnFfmpeg) {
@@ -325,13 +335,13 @@
   var btnNewComp = document.getElementById("btnNewComp");
   if (btnNewComp) {
     btnNewComp.onclick = function () {
-      callHost("create_composition", { name: "Pixopik_SaaS_Demo", preset: document.getElementById("aspectSelect").value })
+      callHost("create_composition", { name: "Pixopik_Pro_Studio", preset: document.getElementById("aspectSelect").value })
         .then(function (r) { log("Created comp: " + r.compName); }).catch(function (e) { log(e.message); });
     };
   }
 
   document.getElementById("btnAddZoom").onclick = function () {
-    callHost("add_smart_zoom_at_playhead", { zoomPercent: 195 }).then(function () { log("Added Smart Zoom!"); }).catch(function (e) { log(e.message); });
+    callHost("add_smart_zoom_at_playhead", { zoomPercent: 190 }).then(function () { log("Added Smart Zoom!"); }).catch(function (e) { log(e.message); });
   };
   document.getElementById("btnSpotlight").onclick = function () {
     callHost("add_spotlight_at_playhead", {}).then(function () { log("Added Spotlight Focus!"); }).catch(function (e) { log(e.message); });
