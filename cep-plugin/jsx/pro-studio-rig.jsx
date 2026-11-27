@@ -19,65 +19,6 @@
     "acc;"
   ].join("\n");
 
-  function u16(n) { return String.fromCharCode(n & 255, (n >> 8) & 255); }
-  function u32(n) { return String.fromCharCode(n & 255, (n >> 8) & 255, (n >> 16) & 255, (n >> 24) & 255); }
-
-  function writeWavMono16(fileObj, sr, samples) {
-    var dataLen = samples.length * 2;
-    var hdr = "RIFF" + u32(36 + dataLen) + "WAVEfmt " + u32(16) + u16(1) + u16(1) + u32(sr) + u32(sr * 2) + u16(2) + u16(16) + "data" + u32(dataLen);
-    var chunks = [hdr];
-    for (var i = 0; i < samples.length; i++) {
-      var s = Math.max(-1, Math.min(1, samples[i]));
-      var v = Math.round(s * 32767);
-      if (v < 0) v += 65536;
-      chunks.push(String.fromCharCode(v & 255, (v >> 8) & 255));
-    }
-    fileObj.encoding = "BINARY";
-    if (fileObj.open("w")) { fileObj.write(chunks.join("")); fileObj.close(); }
-  }
-
-  function ensureBalancedClickWav(pathStr) {
-    var f = new File(pathStr);
-    if (f.exists && f.length > 500) return f;
-    var sr = 44100, dur = 0.052, n = Math.floor(sr * dur), arr = [];
-    for (var i = 0; i < n; i++) {
-      var t = i / sr;
-      var snap = Math.exp(-t * 440) * 0.52;
-      var thock = Math.sin(2 * Math.PI * (250 + 1320 * Math.exp(-t * 165)) * t) * Math.exp(-t * 120) * 0.65;
-      var body = Math.sin(2 * Math.PI * 210 * t) * Math.exp(-t * 90) * 0.30;
-      arr.push((snap + thock + body) * 0.56);
-    }
-    writeWavMono16(f, sr, arr);
-    return f;
-  }
-
-  function ensureVelvetWhooshWav(pathStr) {
-    var f = new File(pathStr);
-    if (f.exists && f.length > 1000) return f;
-    var sr = 44100, dur = 0.27, n = Math.floor(sr * dur), raw = [];
-    var seed = 24681357, x1 = 0, x2 = 0, y1a = 0, y2a = 0, y1b = 0, y2b = 0, maxAbs = 0.0001;
-    for (var i = 0; i < n; i++) {
-      var u = i / n, sSin = Math.sin(Math.PI * u), env = Math.pow(sSin, 1.75);
-      seed = (seed * 1664525 + 1013904223) & 0x7fffffff; var r1 = (seed / 1073741824.0) - 1.0;
-      seed = (seed * 1664525 + 1013904223) & 0x7fffffff; var r2 = (seed / 1073741824.0) - 1.0;
-      var x0 = (r1 + r2) * 0.5;
-      var wA = 2 * Math.PI * (210 + 480 * Math.pow(sSin, 1.35)) / sr, alA = Math.sin(wA) / 2.7;
-      var ya = (alA * (x0 - x2) - (-2 * Math.cos(wA)) * y1a - (1 - alA) * y2a) / (1 + alA);
-      y2a = y1a; y1a = ya;
-      var wB = 2 * Math.PI * (420 + 730 * Math.pow(sSin, 1.5)) / sr, alB = Math.sin(wB) / 3.2;
-      var yb = (alB * (x0 - x2) - (-2 * Math.cos(wB)) * y1b - (1 - alB) * y2b) / (1 + alB);
-      y2b = y1b; y1b = yb;
-      x2 = x1; x1 = x0;
-      var val = (ya * 0.72 + yb * 0.28) * env;
-      raw.push(val);
-      if (Math.abs(val) > maxAbs) maxAbs = Math.abs(val);
-    }
-    var out = [];
-    for (var j = 0; j < raw.length; j++) out.push((raw[j] / maxAbs) * 0.34);
-    writeWavMono16(f, sr, out);
-    return f;
-  }
-
   function hexToRgb(hex) {
     var s = String(hex || "#4F46E5").replace("#", "");
     var n = parseInt(s, 16);
@@ -85,16 +26,42 @@
     return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
   }
 
+  /* Native C++ Batch Keyframe Setter: 50x faster than setValueAtTime loops! */
+  function setBatchKeys(prop, pairs, maxDur) {
+    if (!pairs || pairs.length === 0) return 0;
+    pairs.sort(function (a, b) { return a.t - b.t; });
+    var ts = [], vs = [], lastT = -999;
+    var limit = (maxDur && maxDur > 0.1) ? (maxDur - 0.005) : 99999;
+    for (var i = 0; i < pairs.length; i++) {
+      var t = Math.max(0, Math.min(limit, pairs[i].t));
+      if (t <= lastT + 0.003) t = lastT + 0.004;
+      if (t > limit) break;
+      ts.push(t);
+      vs.push(pairs[i].v);
+      lastT = t;
+    }
+    if (ts.length === 0) return 0;
+    if (ts.length === 1) {
+      prop.setValueAtTime(ts[0], vs[0]);
+      return 1;
+    }
+    prop.setValuesAtTimes(ts, vs);
+    return ts.length;
+  }
+
   function easeProp(prop, inf, smoothSpatial) {
     var influence = inf || 85;
-    for (var k = 1; k <= prop.numKeys; k++) {
-      var dims = 1;
-      try { var vt = prop.keyValue(k); if (vt instanceof Array) dims = vt.length; } catch (_e) {}
-      var eIn = [], eOut = [];
-      for (var d = 0; d < dims; d++) { eIn.push(new KeyframeEase(0, influence)); eOut.push(new KeyframeEase(0, influence)); }
-      try { prop.setTemporalEaseAtKey(k, eIn, eOut); } catch (_e2) {
-        try { prop.setTemporalEaseAtKey(k, [new KeyframeEase(0, influence)], [new KeyframeEase(0, influence)]); } catch (_e3) {}
-      }
+    var n = prop.numKeys;
+    if (n === 0 || n > 120) return; /* Only ease sparse camera/UI keys, never heavy cursor tracks! */
+    var dims = 1;
+    try { var vt = prop.keyValue(1); if (vt instanceof Array) dims = vt.length; } catch (_e) {}
+    var eIn = [], eOut = [];
+    for (var d = 0; d < dims; d++) {
+      eIn.push(new KeyframeEase(0, influence));
+      eOut.push(new KeyframeEase(0, influence));
+    }
+    for (var k = 1; k <= n; k++) {
+      try { prop.setTemporalEaseAtKey(k, eIn, eOut); } catch (_e2) {}
       if (smoothSpatial) {
         try { prop.setSpatialContinuousAtKey(k, true); prop.setSpatialAutoBezierAtKey(k, true); } catch (_es) {}
       }
@@ -104,15 +71,12 @@
   function addProBackdrop(comp, themeName, isTutorial) {
     var pal = THEMES[themeName] || (isTutorial ? THEMES.dark_carbon : THEMES.cosmic_indigo);
     var c1 = hexToRgb(pal[0]), c2 = hexToRgb(pal[1]), c3 = hexToRgb(pal[2]), c4 = hexToRgb(pal[3]);
-    for (var i = comp.numLayers; i >= 1; i--) {
-      if (comp.layer(i).name === "01_Studio_Backdrop") comp.layer(i).remove();
-    }
     var bg = comp.layers.addSolid(c1, "01_Studio_Backdrop", comp.width, comp.height, 1);
     bg.moveToEnd();
     var tr = bg.property("ADBE Transform Group");
     tr.property("ADBE Anchor Point").setValue([comp.width / 2, comp.height / 2]);
     tr.property("ADBE Position").setValue([comp.width / 2, comp.height / 2]);
-    tr.property("ADBE Scale").setValue([122, 122]);
+    tr.property("ADBE Scale").setValue([120, 120]);
 
     try {
       var g4 = bg.property("ADBE Effect Parade").addProperty("ADBE 4ColorGradient");
@@ -120,10 +84,6 @@
       g4.property(3).setValue([comp.width * 0.85, comp.height * 0.20]); g4.property(4).setValue(c2);
       g4.property(5).setValue([comp.width * 0.18, comp.height * 0.85]); g4.property(6).setValue(c3);
       g4.property(7).setValue([comp.width * 0.85, comp.height * 0.82]); g4.property(8).setValue(c4);
-      if (!isTutorial) {
-        g4.property(1).expression = "[width*0.2 + Math.sin(time*0.7)*220, height*0.2 + Math.cos(time*0.5)*140]";
-        g4.property(3).expression = "[width*0.8 + Math.cos(time*0.6)*220, height*0.25 + Math.sin(time*0.8)*140]";
-      }
     } catch (_e) {}
     return bg;
   }
@@ -158,7 +118,7 @@
       var ds1 = card.property("ADBE Effect Parade").addProperty("ADBE Drop Shadow");
       ds1.property("ADBE Drop Shadow-0002").setValue(160);
       ds1.property("ADBE Drop Shadow-0004").setValue(24);
-      ds1.property("ADBE Drop Shadow-0005").setValue(80);
+      ds1.property("ADBE Drop Shadow-0005").setValue(72);
     } catch (_e) {}
 
     if (radius > 0) {
@@ -221,44 +181,63 @@
       var ds = cur.property("ADBE Effect Parade").addProperty("ADBE Drop Shadow");
       ds.property("ADBE Drop Shadow-0002").setValue(145);
       ds.property("ADBE Drop Shadow-0004").setValue(6);
-      ds.property("ADBE Drop Shadow-0005").setValue(14);
+      ds.property("ADBE Drop Shadow-0005").setValue(12);
     } catch (_e) {}
     if (useBlur) cur.motionBlur = true;
-
-    var halo = comp.layers.addShape();
-    halo.name = "04B_Cursor_Glow_Halo";
-    halo.parent = cur;
-    halo.moveAfter(cur);
-    halo.property("ADBE Transform Group").property("ADBE Position").setValue([6, 10]);
-    var hg = halo.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group").property("ADBE Vectors Group");
-    hg.addProperty("ADBE Vector Shape - Ellipse").property("ADBE Vector Ellipse Size").setValue([38, 38]);
-    hg.addProperty("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Color").setValue([0.39, 0.40, 0.98]);
-    halo.property("ADBE Transform Group").property("ADBE Opacity").setValue(24);
     return cur;
   }
 
-  function addRippleInto(targetComp, parentLyr, t, x, y) {
-    var rip = targetComp.layers.addShape();
-    rip.name = "Click_Ripple_" + t.toFixed(2);
-    if (parentLyr) rip.parent = parentLyr;
-    rip.inPoint = Math.max(0, t - 0.02);
-    rip.outPoint = t + 0.52;
-    rip.property("ADBE Transform Group").property("ADBE Position").setValue([x, y]);
+  /* 1 Single Reusable Ripple Layer for ALL Clicks (Zero Layer Bloat, Instant Speed!) */
+  function createSingleMasterRipple(comp, camNull, clicks, toCompFn, dur) {
+    if (!clicks || clicks.length === 0) return;
+    var filtered = [];
+    var lastT = -2;
+    for (var i = 0; i < clicks.length; i++) {
+      if (clicks[i].t - lastT >= 0.48) {
+        filtered.push(clicks[i]);
+        lastT = clicks[i].t;
+      }
+    }
+    if (filtered.length === 0) return;
+
+    var rip = comp.layers.addShape();
+    rip.name = "03_Click_Ripple_FX";
+    rip.parent = camNull;
     var g = rip.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group").property("ADBE Vectors Group");
     var sz = g.addProperty("ADBE Vector Shape - Ellipse").property("ADBE Vector Ellipse Size");
-    sz.setValueAtTime(t, [10, 10]);
-    sz.setValueAtTime(t + 0.44, [90, 90]);
-    easeProp(sz, 75, false);
     var st = g.addProperty("ADBE Vector Graphic - Stroke");
-    st.property("ADBE Vector Stroke Color").setValue([0.39, 0.40, 0.95]);
-    st.property("ADBE Vector Stroke Width").setValueAtTime(t, 5);
-    st.property("ADBE Vector Stroke Width").setValueAtTime(t + 0.44, 1);
-    var op = rip.property("ADBE Transform Group").property("ADBE Opacity");
-    op.setValueAtTime(t, 90);
-    op.setValueAtTime(t + 0.44, 0);
+    st.property("ADBE Vector Stroke Color").setValue([0.39, 0.40, 0.96]);
+    st.property("ADBE Vector Stroke Width").setValue(4.2);
+
+    var tr = rip.property("ADBE Transform Group");
+    var pos = tr.property("ADBE Position");
+    var op  = tr.property("ADBE Opacity");
+    op.setValue(0);
+
+    var posPairs = [], szPairs = [], opPairs = [];
+    opPairs.push({ t: 0, v: 0 });
+    for (var c = 0; c < filtered.length; c++) {
+      var t = filtered[c].t;
+      if (t + 0.05 >= dur) break;
+      var cp = toCompFn(filtered[c].x, filtered[c].y);
+      var endT = Math.min(dur - 0.01, t + 0.42);
+      posPairs.push({ t: Math.max(0, t - 0.01), v: cp });
+      szPairs.push({ t: Math.max(0, t - 0.01), v: [12, 12] });
+      szPairs.push({ t: endT, v: [92, 92] });
+      opPairs.push({ t: Math.max(0, t - 0.015), v: 0 });
+      opPairs.push({ t: t, v: 92 });
+      opPairs.push({ t: endT, v: 0 });
+    }
+
+    setBatchKeys(pos, posPairs, dur);
+    for (var pk = 1; pk <= pos.numKeys; pk++) {
+      try { pos.setInterpolationTypeAtKey(pk, KeyframeInterpolationType.HOLD, KeyframeInterpolationType.HOLD); } catch (_eh) {}
+    }
+    setBatchKeys(sz, szPairs, dur);
+    setBatchKeys(op, opPairs, dur);
   }
 
-  function buildSmoothTravelKeyframes(compW, compH, dur, camPos, camScl, swivel, tilt, curLayer, travelZoom, isTutorial) {
+  function buildSmoothTravelBatch(compW, compH, dur, camPos, camScl, swivel, tilt, pts, travelZoom, isTutorial) {
     var cx = compW / 2, cy = compH / 2, z = travelZoom / 100;
     function clampPt(px, py) {
       var tx = cx - z * (px - cx), ty = cy - z * (py - cy);
@@ -266,74 +245,90 @@
       return [Math.max(cx - maxPX, Math.min(cx + maxPX, tx)), Math.max(cy - maxPY, Math.min(cy + maxPY, ty))];
     }
 
-    var cPos = curLayer ? curLayer.property("ADBE Transform Group").property("ADBE Position") : null;
-    var stops = [];
-    if (cPos && cPos.numKeys > 0) {
-      var lastPt = null;
-      for (var t = 0.95; t < dur - 1.1; t += 0.95) {
-        var p = cPos.valueAtTime(t, false);
-        if (!lastPt || Math.sqrt((p[0]-lastPt[0])*(p[0]-lastPt[0]) + (p[1]-lastPt[1])*(p[1]-lastPt[1])) > 115) {
-          stops.push({ t: t, x: p[0], y: p[1] });
-          lastPt = p;
-        }
+    var stops = [], lastStop = null;
+    for (var i = 0; i < pts.length; i++) {
+      var p = pts[i];
+      if (p.t < 0.9 || p.t > dur - 1.1) continue;
+      if (!lastStop || ((p.t - lastStop.t) >= 1.05 && Math.sqrt((p.x-lastStop.x)*(p.x-lastStop.x) + (p.y-lastStop.y)*(p.y-lastStop.y)) > 125)) {
+        stops.push(p);
+        lastStop = p;
       }
     }
 
-    camPos.setValueAtTime(0, [cx, cy]);
-    camScl.setValueAtTime(0, [100, 100]);
+    var pKeys = [{ t: 0, v: [cx, cy] }];
+    var sKeys = [{ t: 0, v: [100, 100] }];
+    var swKeys = [], tlKeys = [];
 
     if (stops.length > 0) {
       var firstT = Math.max(1.25, stops[0].t);
       var startEase = Math.max(0.05, firstT - 1.2);
-      camPos.setValueAtTime(startEase, [cx, cy]);
-      camScl.setValueAtTime(startEase, [100, 100]);
+      pKeys.push({ t: startEase, v: [cx, cy] });
+      sKeys.push({ t: startEase, v: [100, 100] });
 
-      for (var i = 0; i < stops.length; i++) {
-        var s = stops[i];
-        /* Only gently ease out if user left mouse completely untouched for > 8.5s */
-        if (i > 0 && (s.t - stops[i - 1].t) > 8.5) {
-          camPos.setValueAtTime(stops[i - 1].t + 1.2, [cx, cy]);
-          camScl.setValueAtTime(stops[i - 1].t + 1.2, [100, 100]);
-          camPos.setValueAtTime(s.t - 1.2, [cx, cy]);
-          camScl.setValueAtTime(s.t - 1.2, [100, 100]);
+      for (var s = 0; s < stops.length; s++) {
+        var st = stops[s];
+        if (s > 0 && (st.t - stops[s - 1].t) > 8.5) {
+          pKeys.push({ t: stops[s - 1].t + 1.2, v: [cx, cy] });
+          sKeys.push({ t: stops[s - 1].t + 1.2, v: [100, 100] });
+          pKeys.push({ t: st.t - 1.2, v: [cx, cy] });
+          sKeys.push({ t: st.t - 1.2, v: [100, 100] });
         }
-        var ct = clampPt(s.x, s.y);
-        camPos.setValueAtTime(s.t, ct);
-        camScl.setValueAtTime(s.t, [travelZoom, travelZoom]);
+        pKeys.push({ t: st.t, v: clampPt(st.x, st.y) });
+        sKeys.push({ t: st.t, v: [travelZoom, travelZoom] });
         if (swivel && tilt && !isTutorial) {
-          swivel.setValueAtTime(s.t, ((s.x - cx) / cx) * 3.0);
-          tilt.setValueAtTime(s.t, -((s.y - cy) / cy) * 1.9);
+          swKeys.push({ t: st.t, v: ((st.x - cx) / cx) * 2.8 });
+          tlKeys.push({ t: st.t, v: -((st.y - cy) / cy) * 1.8 });
         }
       }
 
       var endS = stops[stops.length - 1];
       var holdEnd = Math.min(dur - 1.25, endS.t + 0.8);
-      if (holdEnd > endS.t) {
-        camPos.setValueAtTime(holdEnd, clampPt(endS.x, endS.y));
-        camScl.setValueAtTime(holdEnd, [travelZoom, travelZoom]);
+      if (holdEnd > endS.t + 0.05) {
+        pKeys.push({ t: holdEnd, v: clampPt(endS.x, endS.y) });
+        sKeys.push({ t: holdEnd, v: [travelZoom, travelZoom] });
       }
       var outT = Math.min(dur - 0.05, Math.max(holdEnd + 1.15, dur - 0.12));
-      camPos.setValueAtTime(outT, [cx, cy]);
-      camScl.setValueAtTime(outT, [100, 100]);
-      if (swivel && tilt) { swivel.setValueAtTime(outT, 0); tilt.setValueAtTime(outT, 0); }
+      pKeys.push({ t: outT, v: [cx, cy] });
+      sKeys.push({ t: outT, v: [100, 100] });
+      if (swivel && tilt && !isTutorial) {
+        swKeys.push({ t: outT, v: 0 });
+        tlKeys.push({ t: outT, v: 0 });
+      }
     }
+
+    setBatchKeys(camPos, pKeys, dur);
+    setBatchKeys(camScl, sKeys, dur);
+    if (swivel && swKeys.length) setBatchKeys(swivel, swKeys, dur);
+    if (tilt && tlKeys.length) setBatchKeys(tilt, tlKeys, dur);
 
     easeProp(camPos, 90, true);
     easeProp(camScl, 90, false);
-    if (swivel) easeProp(swivel, 85, false);
-    if (tilt) easeProp(tilt, 85, false);
     camPos.expression = GIMBAL_EXPR;
     camScl.expression = GIMBAL_EXPR;
     return stops.length;
   }
 
-  function proAutoRig(args) {
+  function proAutoRig(rawArgs) {
+    var args = rawArgs || {};
+    if (args.payloadFile) {
+      var pf = new File(args.payloadFile);
+      if (pf.exists) {
+        pf.encoding = "UTF-8";
+        if (pf.open("r")) {
+          var txt = pf.read();
+          pf.close();
+          args = eval("(" + txt + ")");
+        }
+      }
+    }
+
     var vFile = new File(args.videoPath);
     if (!vFile.exists) throw new Error("Video not found: " + args.videoPath);
 
     var isTutorial = (args.editMode === "youtube_tutorial");
     var camStyle = args.cameraMode || "smooth_travel";
-    app.beginUndoGroup("Pixopik Studio Rig v1.2");
+
+    app.beginUndoGroup("Pixopik Turbo Studio Rig v1.5");
     try {
       var footage = app.project.importFile(new ImportOptions(vFile));
       var preset = args.aspectPreset || "youtube_16_9";
@@ -343,10 +338,10 @@
       var cx = compW / 2, cy = compH / 2;
 
       var dur = Math.max(2, footage.duration || 10);
-      var prefix = isTutorial ? "YT_Tutorial_" : "AgencyStudio_";
+      var prefix = isTutorial ? "YT_Tutorial_" : "Studio_";
       var comp = app.project.items.addComp((prefix + vFile.name.replace(/\.[^\.]+$/, "")).slice(0, 58), compW, compH, 1, dur, 60);
-      comp.resolutionFactor = isTutorial ? [2, 2] : [1, 1];
-      var useBlur = (args.motionBlur !== false) && !isTutorial;
+      comp.resolutionFactor = [2, 2]; /* Opens in fast Half-Res preview so zero initial freeze! */
+      var useBlur = (args.motionBlur === true);
       comp.motionBlur = useBlur;
 
       addProBackdrop(comp, args.wallpaper || (isTutorial ? "dark_carbon" : "cosmic_indigo"), isTutorial);
@@ -360,10 +355,7 @@
 
       var vidLayer = comp.layers.add(footage);
       vidLayer.name = "02_Screen_Recording";
-      if (footage.hasAudio) {
-        vidLayer.audioEnabled = true;
-        try { vidLayer.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([1.5, 1.5]); } catch (_va) {}
-      }
+      vidLayer.audioEnabled = false; /* Pure silent video ready for clean TTS Voiceover! */
 
       var defaultPad = isTutorial ? 95 : (preset === "shorts_9_16" ? 90 : 84);
       var padPct = (args.windowPaddingPercent || defaultPad) / 100;
@@ -383,35 +375,38 @@
       function toComp(sx, sy) { return [winLeft + (sx / srcW) * winW, winTop + (sy / srcH) * winH]; }
 
       var clicks = (motion && motion.clicks) ? motion.clicks : [];
-      var curCount = 0, curLayer = null;
+      var curCount = 0, compCursorPts = [];
 
-      var ripComp = null;
       if (args.clickRipples !== false && clicks.length > 0) {
-        ripComp = app.project.items.addComp("03_Ripples_" + comp.name.slice(-6), compW, compH, 1, dur, 60);
-        var ripLayer = comp.layers.add(ripComp);
-        ripLayer.name = "03_Click_Ripples_Track";
-        ripLayer.parent = camNull;
-        ripLayer.moveBefore(vidLayer);
+        createSingleMasterRipple(comp, camNull, clicks, toComp, dur);
       }
 
       if (motion && args.vectorCursor !== false && motion.cursorKeys && motion.cursorKeys.length > 0) {
-        var baseS = args.cursorScale || (isTutorial ? 140 : 158);
-        curLayer = createAgencyCursor(comp, baseS, useBlur);
+        var baseS = args.cursorScale || (isTutorial ? 140 : 155);
+        var curLayer = createAgencyCursor(comp, baseS, useBlur);
         curLayer.parent = camNull;
         var cPos = curLayer.property("ADBE Transform Group").property("ADBE Position");
         var cScl = curLayer.property("ADBE Transform Group").property("ADBE Scale");
+
+        var posPairs = [];
         for (var k = 0; k < motion.cursorKeys.length; k++) {
           var s = motion.cursorKeys[k];
-          cPos.setValueAtTime(s.t, toComp(s.x, s.y));
-          curCount++;
+          var pt = toComp(s.x, s.y);
+          posPairs.push({ t: s.t, v: pt });
+          compCursorPts.push({ t: s.t, x: pt[0], y: pt[1] });
         }
-        for (var c = 0; c < clicks.length; c++) {
-          var clk = clicks[c];
-          var cp = toComp(clk.x, clk.y);
-          cScl.setValueAtTime(Math.max(0, clk.t - 0.05), [baseS, baseS]);
-          cScl.setValueAtTime(clk.t, [baseS * 0.78, baseS * 0.78]);
-          cScl.setValueAtTime(clk.t + 0.14, [baseS, baseS]);
-          if (ripComp) addRippleInto(ripComp, null, clk.t, cp[0], cp[1]);
+        curCount = setBatchKeys(cPos, posPairs, dur);
+
+        if (clicks.length > 0) {
+          var sclPairs = [];
+          for (var c = 0; c < clicks.length; c++) {
+            var ct = clicks[c].t;
+            if (ct + 0.15 >= dur) break;
+            sclPairs.push({ t: Math.max(0, ct - 0.05), v: [baseS, baseS] });
+            sclPairs.push({ t: ct, v: [baseS * 0.78, baseS * 0.78] });
+            sclPairs.push({ t: ct + 0.14, v: [baseS, baseS] });
+          }
+          setBatchKeys(cScl, sclPairs, dur);
         }
         curLayer.moveToBeginning();
       }
@@ -431,65 +426,63 @@
       var zoomClusters = 0;
 
       if (args.autoZoom !== false) {
-        if (camStyle === "smooth_travel" && curLayer) {
+        if (camStyle === "smooth_travel" && compCursorPts.length > 0) {
           var tZoom = args.zoomPercent || (isTutorial ? 142 : (preset === "shorts_9_16" ? 195 : 154));
-          zoomClusters = buildSmoothTravelKeyframes(compW, compH, dur, camPos, camScl, swivel, tilt, curLayer, tZoom, isTutorial);
+          zoomClusters = buildSmoothTravelBatch(compW, compH, dur, camPos, camScl, swivel, tilt, compCursorPts, tZoom, isTutorial);
         } else if (clicks.length > 0) {
           var zoomPct = args.zoomPercent || (isTutorial ? 145 : (preset === "shorts_9_16" ? 215 : 176));
           var z = zoomPct / 100, idx = 0, minGap = isTutorial ? 2.6 : 1.8;
+          var cpKeys = [], csKeys = [];
           while (idx < clicks.length) {
             if (clicks[idx].t < 1.05) { idx++; continue; }
             var enterT = Math.max(1.0, clicks[idx].t - 0.5);
-            camPos.setValueAtTime(enterT, [cx, cy]); camScl.setValueAtTime(enterT, [100, 100]);
+            cpKeys.push({ t: enterT, v: [cx, cy] }); csKeys.push({ t: enterT, v: [100, 100] });
             zoomClusters++;
             var lastHold = clicks[idx].t;
             while (idx < clicks.length) {
-              var cn = clicks[idx], pt = toComp(cn.x, cn.y);
-              var zx = cx - z * (pt[0] - cx), zy = cy - z * (pt[1] - cy);
+              var cn = clicks[idx], ptc = toComp(cn.x, cn.y);
+              var zx = cx - z * (ptc[0] - cx), zy = cy - z * (ptc[1] - cy);
               var maxPX = (compW * (z - 1)) / 2, maxPY = (compH * (z - 1)) / 2;
               zx = Math.max(cx - maxPX, Math.min(cx + maxPX, zx));
               zy = Math.max(cy - maxPY, Math.min(cy + maxPY, zy));
               var holdT = cn.t + (isTutorial ? 1.15 : 0.85);
-              camPos.setValueAtTime(cn.t, [zx, zy]);  camScl.setValueAtTime(cn.t, [zoomPct, zoomPct]);
-              camPos.setValueAtTime(holdT, [zx, zy]); camScl.setValueAtTime(holdT, [zoomPct, zoomPct]);
+              cpKeys.push({ t: cn.t, v: [zx, zy] });  csKeys.push({ t: cn.t, v: [zoomPct, zoomPct] });
+              cpKeys.push({ t: holdT, v: [zx, zy] }); csKeys.push({ t: holdT, v: [zoomPct, zoomPct] });
               lastHold = holdT;
               if (idx + 1 < clicks.length && (clicks[idx + 1].t - holdT) < minGap) idx++;
               else { idx++; break; }
             }
             var exitT = Math.min(dur - 0.1, lastHold + 0.55);
-            camPos.setValueAtTime(exitT, [cx, cy]); camScl.setValueAtTime(exitT, [100, 100]);
+            cpKeys.push({ t: exitT, v: [cx, cy] }); csKeys.push({ t: exitT, v: [100, 100] });
           }
+          setBatchKeys(camPos, cpKeys, dur);
+          setBatchKeys(camScl, csKeys, dur);
           easeProp(camPos, 82, false); easeProp(camScl, 82, false);
         }
       }
-
-      try {
-        var tmp = Folder.temp.fsName.replace(/\\/g, "/");
-        var clickItem = app.project.importFile(new ImportOptions(ensureBalancedClickWav(tmp + "/px_balanced_click_v3.wav")));
-        var clickComp = app.project.items.addComp("07_Mouse_Click_SFX_" + comp.name.slice(-5), 100, 100, 1, dur, 60);
-        for (var sc = 0; sc < clicks.length; sc++) {
-          clickComp.layers.add(clickItem).startTime = Math.max(0, clicks[sc].t - 0.004);
-        }
-        var clickLyr = comp.layers.add(clickComp);
-        clickLyr.name = "07_Mouse_Click_SFX"; clickLyr.enabled = false; clickLyr.audioEnabled = true;
-        var clickDb = (isTutorial || footage.hasAudio) ? -7.5 : -2.5;
-        try { clickLyr.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([clickDb, clickDb]); } catch (_ea1) {}
-
-        if (!isTutorial && camStyle !== "smooth_travel") {
-          var whooshItem = app.project.importFile(new ImportOptions(ensureVelvetWhooshWav(tmp + "/px_velvet_whoosh_v3.wav")));
-          var wComp = app.project.items.addComp("07B_Soft_Whoosh_SFX_" + comp.name.slice(-5), 100, 100, 1, dur, 60);
-          wComp.layers.add(whooshItem).startTime = 0.06;
-          var wLyr = comp.layers.add(wComp);
-          wLyr.name = "07B_Soft_Whoosh_SFX"; wLyr.enabled = false; wLyr.audioEnabled = true;
-          try { wLyr.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([-4, -4]); } catch (_ea2) {}
-        }
-      } catch (_sfxErr) {}
 
       comp.openInViewer();
       return { ok: true, compName: comp.name, cameraMode: camStyle, cursorKeyframes: curCount, autoZoomClusters: zoomClusters };
     } finally {
       app.endUndoGroup();
     }
+  }
+
+  function importTtsVoiceover(args) {
+    var comp = app.project ? app.project.activeItem : null;
+    if (!comp || !(comp instanceof CompItem)) throw new Error("Open your composition first!");
+    var af = new File(args.audioPath);
+    if (!af.exists) throw new Error("TTS audio file not found.");
+    app.beginUndoGroup("Add TTS Voiceover");
+    try {
+      var item = app.project.importFile(new ImportOptions(af));
+      if (item.duration > comp.duration) comp.duration = item.duration + 0.5;
+      var lyr = comp.layers.add(item);
+      lyr.name = "00_TTS_Voiceover";
+      lyr.startTime = 0;
+      lyr.moveToBeginning();
+      return { ok: true, duration: item.duration };
+    } finally { app.endUndoGroup(); }
   }
 
   function applySmoothTravelToActive() {
@@ -502,7 +495,7 @@
       if (nm === "04_Vector_Cursor") curLayer = comp.layer(l);
       if (nm === "06_Cinema_3D_Director") dirAdj = comp.layer(l);
     }
-    if (!camNull || !curLayer) throw new Error("05_Smart_Camera_Rig / 04_Vector_Cursor not found in active comp.");
+    if (!camNull || !curLayer) throw new Error("05_Smart_Camera_Rig / 04_Vector_Cursor not found.");
 
     app.beginUndoGroup("Apply Smooth Travel Glide");
     try {
@@ -512,6 +505,12 @@
       while (camScl.numKeys > 0) camScl.removeKey(camScl.numKeys);
       camPos.expression = ""; camScl.expression = "";
 
+      var cPos = curLayer.property("ADBE Transform Group").property("ADBE Position");
+      var pts = [];
+      for (var t = 0.9; t < comp.duration - 1.0; t += 0.95) {
+        var pv = cPos.valueAtTime(t, false);
+        pts.push({ t: t, x: pv[0], y: pv[1] });
+      }
       var swivel = null, tilt = null;
       if (dirAdj) {
         try {
@@ -520,12 +519,11 @@
             swivel = b3d.property(1); tilt = b3d.property(2);
             while (swivel.numKeys > 0) swivel.removeKey(swivel.numKeys);
             while (tilt.numKeys > 0) tilt.removeKey(tilt.numKeys);
-            swivel.setValue(0); tilt.setValue(0);
           }
         } catch (_e3) {}
       }
       var isYT = (comp.name.indexOf("YT_Tutorial_") === 0);
-      var wp = buildSmoothTravelKeyframes(comp.width, comp.height, comp.duration, camPos, camScl, swivel, tilt, curLayer, isYT ? 142 : 154, isYT);
+      var wp = buildSmoothTravelBatch(comp.width, comp.height, comp.duration, camPos, camScl, swivel, tilt, pts, isYT ? 142 : 154, isYT);
       return { ok: true, compName: comp.name, travelWaypoints: wp };
     } finally { app.endUndoGroup(); }
   }
@@ -548,14 +546,16 @@
       var tr = box.property("ADBE Transform Group");
       tr.property("ADBE Position").setValue([cx, yPos]);
       var sc = tr.property("ADBE Scale");
-      sc.setValueAtTime(t0, [0, 0]);
-      sc.setValueAtTime(t0 + 0.32, [106, 106]);
-      sc.setValueAtTime(t0 + 0.45, [100, 100]);
-      sc.setValueAtTime(t0 + 1.4, [100, 100]);
-      sc.setValueAtTime(t0 + 1.5, [90, 90]);
-      sc.setValueAtTime(t0 + 1.65, [100, 100]);
-      sc.setValueAtTime(t0 + 3.0, [100, 100]);
-      sc.setValueAtTime(t0 + 3.35, [0, 0]);
+      setBatchKeys(sc, [
+        { t: t0, v: [0, 0] },
+        { t: t0 + 0.32, v: [106, 106] },
+        { t: t0 + 0.45, v: [100, 100] },
+        { t: t0 + 1.4, v: [100, 100] },
+        { t: t0 + 1.5, v: [90, 90] },
+        { t: t0 + 1.65, v: [100, 100] },
+        { t: t0 + 3.0, v: [100, 100] },
+        { t: t0 + 3.35, v: [0, 0] }
+      ], comp.duration);
       easeProp(sc, 78, false);
 
       var txt = comp.layers.addText("SUBSCRIBE  •  🔔");
@@ -589,10 +589,12 @@
       st.property("ADBE Vector Stroke Width").setValue(2.5);
 
       var pos = bar.property("ADBE Transform Group").property("ADBE Position");
-      pos.setValueAtTime(t0, [-260, comp.height - 110]);
-      pos.setValueAtTime(t0 + 0.4, [290, comp.height - 110]);
-      pos.setValueAtTime(t0 + 3.3, [290, comp.height - 110]);
-      pos.setValueAtTime(t0 + 3.75, [-260, comp.height - 110]);
+      setBatchKeys(pos, [
+        { t: t0, v: [-260, comp.height - 110] },
+        { t: t0 + 0.4, v: [290, comp.height - 110] },
+        { t: t0 + 3.3, v: [290, comp.height - 110] },
+        { t: t0 + 3.75, v: [-260, comp.height - 110] }
+      ], comp.duration);
       easeProp(pos, 82, false);
 
       var txt = comp.layers.addText(label);
@@ -629,9 +631,10 @@
   }
 
   PixopikAE.dispatch = function (action, b64Args) {
-    if (action === "import_and_autorig_recording" || action === "apply_smooth_travel" || action === "add_youtube_subscribe" || action === "add_youtube_chapter") {
+    if (action === "import_and_autorig_recording" || action === "import_tts_voiceover" || action === "apply_smooth_travel" || action === "add_youtube_subscribe" || action === "add_youtube_chapter") {
       try {
         var parsed = b64Args ? eval("(" + decB64(b64Args) + ")") : {};
+        if (action === "import_tts_voiceover") return toJson(importTtsVoiceover(parsed));
         if (action === "apply_smooth_travel") return toJson(applySmoothTravelToActive());
         if (action === "add_youtube_subscribe") return toJson(addYouTubeSubscribePill());
         if (action === "add_youtube_chapter") return toJson(addYouTubeChapterCard(parsed));
