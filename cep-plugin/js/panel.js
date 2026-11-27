@@ -68,7 +68,7 @@
       if ((redirects || 0) > 4) return reject(new Error("Too many redirects"));
       var req = https.get(url, {
         headers: {
-          "User-Agent": "Pixopik-Motion-Studio-OTA/1.6.3",
+          "User-Agent": "Pixopik-Motion-Studio-OTA/1.6.4",
           "Accept": "application/vnd.github.v3+json, */*",
           "Cache-Control": "no-cache"
         }
@@ -144,7 +144,7 @@
         "recorder/ghost-dimmer.ps1", "recorder/studio-browser.ps1", "recorder/install-ffmpeg.ps1"
       ];
       var fileList = defaultFiles;
-      var remoteVer = "1.6.3";
+      var remoteVer = "1.6.4";
 
       try {
         var manBuf = await downloadRepoFileSmart(latestSha, "ota-manifest.json");
@@ -156,13 +156,19 @@
       var updatedCount = 0;
       for (var i = 0; i < fileList.length; i++) {
         var rel = fileList[i].replace(/^\/+/, "");
-        var fileBuf = await downloadRepoFileSmart(latestSha, rel);
-        if (fileBuf && fileBuf.length > 5) {
-          var dest = path.join(EXT_ROOT, rel);
-          fs.mkdirSync(path.dirname(dest), { recursive: true });
-          fs.writeFileSync(dest, fileBuf);
-          updatedCount++;
-        }
+        try {
+          var fileBuf = await downloadRepoFileSmart(latestSha, rel);
+          if (fileBuf && fileBuf.length > 3) {
+            var dest = path.join(EXT_ROOT, rel);
+            fs.mkdirSync(path.dirname(dest), { recursive: true });
+            fs.writeFileSync(dest, fileBuf);
+            updatedCount++;
+          }
+        } catch (_fileErr) {}
+      }
+
+      if (updatedCount === 0) {
+        throw new Error("Could not fetch files from CDN/API");
       }
 
       if (latestSha) {
@@ -201,7 +207,6 @@
     ], Object.assign({ windowsHide: true }, opts || {}));
   }
 
-  /* Built-in Eye-Safe Ghost Dimmer (100% invisible in MP4 & screenshots, zero DimScreen conflict!) */
   var ghostDimProc = null;
   if (ghostDimSelect) {
     ghostDimSelect.onchange = function () {
@@ -322,7 +327,7 @@
 
   loadExtendScripts(function (res) {
     if (String(res).indexOf("OK") === 0) {
-      log("OTA v1.6.3 ready (Built-In Ghost Eye Dimmer Ready!)", "ok");
+      log("OTA v1.6.4 ready (Built-In Ghost Eye Dimmer + Fast Sync!)", "ok");
     } else {
       log("Engine init: " + res, "err");
     }
@@ -621,7 +626,7 @@
     var url = (wsInput.value || "").trim();
     setStatus(false, "Connecting...");
     ws = new WebSocket(url);
-    ws.onopen = function () { setStatus(true, "OTA v1.6.3"); log("Connected to Cloud MCP Relay!", "ok"); };
+    ws.onopen = function () { setStatus(true, "OTA v1.6.4"); log("Connected to Cloud MCP Relay!", "ok"); };
     ws.onmessage = async function (ev) {
       var msg;
       try { msg = JSON.parse(ev.data); } catch (_e) { return; }
