@@ -41,6 +41,33 @@
     return f;
   }
 
+  function ensureVelvetWhooshWav(pathStr) {
+    var f = new File(pathStr);
+    if (f.exists && f.length > 1000) return f;
+    var sr = 44100, dur = 0.27, n = Math.floor(sr * dur), raw = [];
+    var seed = 24681357, x1 = 0, x2 = 0, y1a = 0, y2a = 0, y1b = 0, y2b = 0, maxAbs = 0.0001;
+    for (var i = 0; i < n; i++) {
+      var u = i / n, sSin = Math.sin(Math.PI * u), env = Math.pow(sSin, 1.75);
+      seed = (seed * 1664525 + 1013904223) & 0x7fffffff; var r1 = (seed / 1073741824.0) - 1.0;
+      seed = (seed * 1664525 + 1013904223) & 0x7fffffff; var r2 = (seed / 1073741824.0) - 1.0;
+      var x0 = (r1 + r2) * 0.5;
+      var wA = 2 * Math.PI * (210 + 480 * Math.pow(sSin, 1.35)) / sr, alA = Math.sin(wA) / 2.7;
+      var ya = (alA * (x0 - x2) - (-2 * Math.cos(wA)) * y1a - (1 - alA) * y2a) / (1 + alA);
+      y2a = y1a; y1a = ya;
+      var wB = 2 * Math.PI * (420 + 730 * Math.pow(sSin, 1.5)) / sr, alB = Math.sin(wB) / 3.2;
+      var yb = (alB * (x0 - x2) - (-2 * Math.cos(wB)) * y1b - (1 - alB) * y2b) / (1 + alB);
+      y2b = y1b; y1b = yb;
+      x2 = x1; x1 = x0;
+      var val = (ya * 0.72 + yb * 0.28) * env;
+      raw.push(val);
+      if (Math.abs(val) > maxAbs) maxAbs = Math.abs(val);
+    }
+    var out = [];
+    for (var j = 0; j < raw.length; j++) out.push((raw[j] / maxAbs) * 0.34);
+    writeWavMono16(f, sr, out);
+    return f;
+  }
+
   function hexToRgb(hex) {
     var s = String(hex || "#4F46E5").replace("#", "");
     var n = parseInt(s, 16);
@@ -226,7 +253,7 @@
     var vFile = new File(args.videoPath);
     if (!vFile.exists) throw new Error("Video not found: " + args.videoPath);
 
-    app.beginUndoGroup("Pixopik Agency Studio Rig v2.2");
+    app.beginUndoGroup("Pixopik Agency Studio Rig v2.3");
     try {
       var footage = app.project.importFile(new ImportOptions(vFile));
       var preset = args.aspectPreset || "youtube_16_9";
@@ -345,20 +372,33 @@
       easeProp(camPos, 82); easeProp(camScl, 82);
       if (swivel) easeProp(swivel, 78); if (tilt) easeProp(tilt, 78);
 
-      /* Clean Balanced Tactile Mouse Click SFX Only (-2.5 dB, no artificial whoosh) */
+      /* Balanced Click (-2.5dB) + Subtle Biquad Velvet Whoosh (-4dB) on separate layers */
       try {
         var tmp = Folder.temp.fsName.replace(/\\/g, "/");
         var clickItem = app.project.importFile(new ImportOptions(ensureBalancedClickWav(tmp + "/px_balanced_click_v3.wav")));
+        var whooshItem = app.project.importFile(new ImportOptions(ensureVelvetWhooshWav(tmp + "/px_velvet_whoosh_v3.wav")));
+
         var clickComp = app.project.items.addComp("07_Mouse_Click_SFX_" + comp.name.slice(-5), 100, 100, 1, dur, 60);
         for (var sc = 0; sc < clicks.length; sc++) {
           var cl = clickComp.layers.add(clickItem);
           cl.startTime = Math.max(0, clicks[sc].t - 0.004);
         }
         var clickLyr = comp.layers.add(clickComp);
-        clickLyr.name = "07_Mouse_Click_SFX";
-        clickLyr.enabled = false;
-        clickLyr.audioEnabled = true;
-        try { clickLyr.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([-2.5, -2.5]); } catch (_ea) {}
+        clickLyr.name = "07_Mouse_Click_SFX"; clickLyr.enabled = false; clickLyr.audioEnabled = true;
+        try { clickLyr.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([-2.5, -2.5]); } catch (_ea1) {}
+
+        var wComp = app.project.items.addComp("07B_Soft_Whoosh_SFX_" + comp.name.slice(-5), 100, 100, 1, dur, 60);
+        wComp.layers.add(whooshItem).startTime = 0.06;
+        var lastW = 0.5;
+        for (var wc = 0; wc < clicks.length; wc++) {
+          if (clicks[wc].t > 1.1 && (clicks[wc].t - lastW) >= 3.2) {
+            wComp.layers.add(whooshItem).startTime = Math.max(0, clicks[wc].t - 0.32);
+            lastW = clicks[wc].t;
+          }
+        }
+        var wLyr = comp.layers.add(wComp);
+        wLyr.name = "07B_Soft_Whoosh_SFX"; wLyr.enabled = false; wLyr.audioEnabled = true;
+        try { wLyr.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([-4, -4]); } catch (_ea2) {}
       } catch (_sfxErr) {}
 
       comp.openInViewer();
