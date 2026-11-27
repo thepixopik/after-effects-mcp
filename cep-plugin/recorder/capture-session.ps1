@@ -1,12 +1,160 @@
 param(
   [Parameter(Mandatory=$true)][string]$SessionDir,
   [int]$Fps = 60,
-  [int]$Countdown = 3
+  [int]$Countdown = 3,
+  [string]$PickMode = "",
+  [int]$InitW = 1280,
+  [int]$InitH = 720
 )
 
 $ErrorActionPreference = "SilentlyContinue"
 New-Item -ItemType Directory -Force -Path $SessionDir | Out-Null
 
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+[System.Windows.Forms.Application]::EnableVisualStyles()
+
+$bounds  = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$screenW = $bounds.Width
+$screenH = $bounds.Height
+
+# ============================================================================
+# INTERACTIVE BANDICAM REGION / RECTANGLE PICKER & SCREENSHOT MODES
+# ============================================================================
+if ($PickMode -eq "area") {
+  $outJson = Join-Path $SessionDir "picked_region.json"
+  if (Test-Path -LiteralPath $outJson) { Remove-Item -LiteralPath $outJson -Force }
+
+  $ov = New-Object System.Windows.Forms.Form
+  $ov.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+  $ov.Bounds = $bounds
+  $ov.TopMost = $true
+  $ov.ShowInTaskbar = $false
+  $ov.BackColor = [System.Drawing.Color]::FromArgb(12, 18, 30)
+  $ov.Opacity = 0.48
+  $ov.Cursor = [System.Windows.Forms.Cursors]::Cross
+  $ov.KeyPreview = $true
+  $ov.GetType().GetProperty("DoubleBuffered", [System.Reflection.BindingFlags]"Instance,NonPublic").SetValue($ov, $true, $null)
+
+  $script:dragging = $false
+  $script:startPt  = [System.Drawing.Point]::Empty
+  $script:curRect  = [System.Drawing.Rectangle]::Empty
+  $penBox = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(244, 63, 94), 3)
+  $fontBg = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
+
+  $ov.Add_KeyDown({ if ($_.KeyCode -eq "Escape") { $ov.Close() } })
+  $ov.Add_MouseDown({
+    if ($_.Button -eq "Left") {
+      $script:dragging = $true
+      $script:startPt = $_.Location
+      $script:curRect = New-Object System.Drawing.Rectangle($_.X, $_.Y, 0, 0)
+    }
+  })
+  $ov.Add_MouseMove({
+    if ($script:dragging) {
+      $x = [Math]::Min($script:startPt.X, $_.X)
+      $y = [Math]::Min($script:startPt.Y, $_.Y)
+      $w = [Math]::Abs($_.X - $script:startPt.X)
+      $h = [Math]::Abs($_.Y - $script:startPt.Y)
+      $script:curRect = New-Object System.Drawing.Rectangle($x, $y, $w, $h)
+      $ov.Invalidate()
+    }
+  })
+  $ov.Add_MouseUp({
+    if ($script:dragging) {
+      $script:dragging = $false
+      if ($script:curRect.Width -ge 80 -and $script:curRect.Height -ge 80) {
+        $res = @{ ok = $true; x = $script:curRect.X; y = $script:curRect.Y; w = ([int]([Math]::Floor($script:curRect.Width / 2) * 2)); h = ([int]([Math]::Floor($script:curRect.Height / 2) * 2)) }
+        [System.IO.File]::WriteAllText($outJson, ($res | ConvertTo-Json -Compress), [System.Text.UTF8Encoding]::new($false))
+      }
+      $ov.Close()
+    }
+  })
+  $ov.Add_Paint({
+    $g = $_.Graphics
+    if ($script:curRect.Width -gt 4 -and $script:curRect.Height -gt 4) {
+      $g.FillRectangle((New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(45, 99, 102, 241))), $script:curRect)
+      $g.DrawRectangle($penBox, $script:curRect)
+      $txt = "$($script:curRect.Width) x $($script:curRect.Height)"
+      $g.FillRectangle([System.Drawing.Brushes]::Black, $script:curRect.X, [Math]::Max(4, $script:curRect.Y - 28), 130, 24)
+      $g.DrawString($txt, $fontBg, [System.Drawing.Brushes]::White, ($script:curRect.X + 8), [Math]::Max(6, $script:curRect.Y - 26))
+    } else {
+      $g.DrawString("Drag mouse to select recording area  •  ESC to cancel", $fontBg, [System.Drawing.Brushes]::White, ([int]($screenW / 2) - 210), 28)
+    }
+  })
+  [System.Windows.Forms.Application]::Run($ov)
+  exit 0
+}
+
+if ($PickMode -eq "rect") {
+  $outJson = Join-Path $SessionDir "picked_region.json"
+  if (Test-Path -LiteralPath $outJson) { Remove-Item -LiteralPath $outJson -Force }
+
+  $rw = [Math]::Min($screenW - 40, [Math]::Max(200, $InitW))
+  $rh = [Math]::Min($screenH - 80, [Math]::Max(200, $InitH))
+  $box = New-Object System.Windows.Forms.Form
+  $box.Text = "Position Recording Frame ($rw x $rh) — Drag Window, Then Click [Lock Frame]"
+  $box.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::SizableToolWindow
+  $box.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+  $box.ClientSize = New-Object System.Drawing.Size($rw, $rh)
+  $box.TopMost = $true
+  $box.BackColor = [System.Drawing.Color]::Magenta
+  $box.TransparencyKey = [System.Drawing.Color]::Magenta
+
+  $topStrip = New-Object System.Windows.Forms.Panel
+  $topStrip.Dock = [System.Windows.Forms.DockStyle]::Top
+  $topStrip.Height = 34
+  $topStrip.BackColor = [System.Drawing.Color]::FromArgb(20, 25, 35)
+  $box.Controls.Add($topStrip)
+
+  $infoL = New-Object System.Windows.Forms.Label
+  $infoL.Text = "▭  Move/Resize red frame over target area"
+  $infoL.ForeColor = [System.Drawing.Color]::White
+  $infoL.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+  $infoL.Left = 10; $infoL.Top = 8; $infoL.Width = 280
+  $topStrip.Controls.Add($infoL)
+
+  $okBtn = New-Object System.Windows.Forms.Button
+  $okBtn.Text = "✓ Lock Frame"
+  $okBtn.Left = $rw - 115; $okBtn.Top = 4; $okBtn.Width = 105; $okBtn.Height = 26
+  $okBtn.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+  $okBtn.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+  $okBtn.BackColor = [System.Drawing.Color]::FromArgb(225, 29, 72)
+  $okBtn.ForeColor = [System.Drawing.Color]::White
+  $okBtn.Add_Click({
+    $pt = $box.PointToScreen((New-Object System.Drawing.Point(0, 34)))
+    $cw = [int]([Math]::Floor($box.ClientSize.Width / 2) * 2)
+    $ch = [int]([Math]::Floor(($box.ClientSize.Height - 34) / 2) * 2)
+    $res = @{ ok = $true; x = [Math]::Max(0, $pt.X); y = [Math]::Max(0, $pt.Y); w = $cw; h = $ch }
+    [System.IO.File]::WriteAllText($outJson, ($res | ConvertTo-Json -Compress), [System.Text.UTF8Encoding]::new($false))
+    $box.Close()
+  })
+  $topStrip.Controls.Add($okBtn)
+
+  $box.Add_Paint({
+    $p = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(244, 63, 94), 4)
+    $_.Graphics.DrawRectangle($p, 2, 36, $box.ClientSize.Width - 4, $box.ClientSize.Height - 38)
+  })
+  [System.Windows.Forms.Application]::Run($box)
+  exit 0
+}
+
+if ($PickMode -eq "screenshot") {
+  $shotDir = Join-Path $SessionDir "Screenshots"
+  New-Item -ItemType Directory -Force -Path $shotDir | Out-Null
+  $shotPath = Join-Path $shotDir ("shot_" + (Get-Date).ToString("yyyyMMdd_HHmmss") + ".png")
+  $bmp = New-Object System.Drawing.Bitmap($screenW, $screenH)
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.CopyFromScreen(0, 0, 0, 0, $bmp.Size)
+  $bmp.Save($shotPath, [System.Drawing.Imaging.ImageFormat]::Png)
+  $g.Dispose(); $bmp.Dispose()
+  [System.IO.File]::WriteAllText((Join-Path $SessionDir "last_shot.txt"), $shotPath, [System.Text.UTF8Encoding]::new($false))
+  exit 0
+}
+
+# ============================================================================
+# MAIN 60 FPS CAPTURE ENGINE (Supports Fullscreen, Area, Rect, Window, Mouse!)
+# ============================================================================
 $videoOut          = Join-Path $SessionDir "screen.mp4"
 $motionOut         = Join-Path $SessionDir "motion.json"
 $script:stopSignal = Join-Path $SessionDir "stop.signal"
@@ -34,6 +182,7 @@ public static class PxRecGhost {
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
   [DllImport("user32.dll")] public static extern bool GetLayeredWindowAttributes(IntPtr hwnd, out uint crKey, out byte bAlpha, out uint dwFlags);
 
@@ -45,7 +194,6 @@ public static class PxRecGhost {
       RECT rc;
       if (!GetWindowRect(hWnd, out rc)) return true;
       if ((rc.Right - rc.Left) < minW || (rc.Bottom - rc.Top) < minH) return true;
-
       uint pid = 0;
       GetWindowThreadProcessId(hWnd, out pid);
       if (pid == 0) return true;
@@ -56,9 +204,7 @@ public static class PxRecGhost {
           uint cr; byte alpha = 128; uint flags = 0;
           if (GetLayeredWindowAttributes(hWnd, out cr, out alpha, out flags)) {
             if (alpha > maxAlpha) maxAlpha = alpha;
-          } else if (maxAlpha == 0) {
-            maxAlpha = 128;
-          }
+          } else if (maxAlpha == 0) { maxAlpha = 128; }
           if (!pids.Contains(pid)) pids.Add(pid);
         }
       } catch {}
@@ -91,18 +237,50 @@ if (-not $ffmpegExe) {
   exit 1
 }
 
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
+# Read Bandicam Capture Target Settings from studio_v2_prefs.json
+$prefsFile = Join-Path (Split-Path $SessionDir -Parent) "studio_v2_prefs.json"
+$capMode   = "fullscreen"
+$cropX = 0; $cropY = 0; $cropW = $screenW; $cropH = $screenH
+$useCrop = $false
+$targetHwnd = [IntPtr]::Zero
 
-$bounds  = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-$screenW = $bounds.Width
-$screenH = $bounds.Height
+if (Test-Path -LiteralPath $prefsFile) {
+  try {
+    $pObj = Get-Content -LiteralPath $prefsFile -Raw | ConvertFrom-Json
+    if ($pObj.captureMode) { $capMode = [string]$pObj.captureMode }
+    if (($capMode -eq "select_area" -or $capMode -eq "rectangle") -and $pObj.cropW -ge 80 -and $pObj.cropH -ge 80) {
+      $cropX = [int]$pObj.cropX; $cropY = [int]$pObj.cropY
+      $cropW = [int]$pObj.cropW; $cropH = [int]$pObj.cropH
+      $useCrop = $true
+    } elseif ($capMode -eq "specific_window" -and $pObj.windowPid) {
+      $wp = Get-Process -Id ([int]$pObj.windowPid) -ErrorAction SilentlyContinue
+      if ($wp -and $wp.MainWindowHandle -ne [IntPtr]::Zero) {
+        $targetHwnd = $wp.MainWindowHandle
+        try { [void][PxRecGhost]::SetForegroundWindow($targetHwnd) } catch {}
+        Start-Sleep -Milliseconds 180
+        $rc = New-Object PxRecGhost+RECT
+        if ([PxRecGhost]::GetWindowRect($targetHwnd, [ref]$rc)) {
+          $cropX = [Math]::Max(0, $rc.Left + 7)
+          $cropY = [Math]::Max(0, $rc.Top)
+          $cropW = ($rc.Right - $rc.Left) - 14
+          $cropH = ($rc.Bottom - $rc.Top) - 7
+          $useCrop = $true
+        }
+      }
+    }
+  } catch {}
+}
 
-# ============================================================================
-# ZERO-OVERLAP DIMSCREEN SWAP:
-# Close external DimScreen.exe FIRST -> verify it actually closed -> ONLY THEN
-# apply Ghost Dimmer at the exact same % (NEVER stacks two dimmers!)
-# ============================================================================
+if ($useCrop) {
+  $cropX = [Math]::Max(0, [Math]::Min($screenW - 80, $cropX))
+  $cropY = [Math]::Max(0, [Math]::Min($screenH - 80, $cropY))
+  $cropW = [Math]::Min($screenW - $cropX, [Math]::Max(80, [int]([Math]::Floor($cropW / 2) * 2)))
+  $cropH = [Math]::Min($screenH - $cropY, [Math]::Max(80, [int]([Math]::Floor($cropH / 2) * 2)))
+} else {
+  $cropX = 0; $cropY = 0; $cropW = $screenW; $cropH = $screenH
+}
+
+# DimScreen Auto-Swap
 $dimmerAlpha = [byte]0
 $extDimPids = [PxRecGhost]::FindExternalDimmerPids([int]($screenW * 0.6), [int]($screenH * 0.6), [ref]$dimmerAlpha)
 $relaunchDimExes = New-Object System.Collections.Generic.List[string]
@@ -114,35 +292,22 @@ if ($extDimPids -and $extDimPids.Count -gt 0 -and $dimmerAlpha -gt 5) {
       $pObj = Get-Process -Id ([int]$dpid) -ErrorAction SilentlyContinue
       if ($pObj) {
         $exePath = $pObj.Path
-        if (-not $exePath) {
-          $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$dpid" -ErrorAction SilentlyContinue
-          if ($cim) { $exePath = $cim.ExecutablePath }
-        }
         Stop-Process -Id ([int]$dpid) -Force -ErrorAction SilentlyContinue
-        if ($exePath -and -not $relaunchDimExes.Contains($exePath)) {
-          $relaunchDimExes.Add($exePath)
-        }
+        if ($exePath -and -not $relaunchDimExes.Contains($exePath)) { $relaunchDimExes.Add($exePath) }
       }
     } catch {}
   }
-
   Start-Sleep -Milliseconds 140
   $stillAlpha = [byte]0
   $remaining = [PxRecGhost]::FindExternalDimmerPids([int]($screenW * 0.6), [int]($screenH * 0.6), [ref]$stillAlpha)
-
-  # SAFETY GUARANTEE: Only show Ghost Dimmer if external DimScreen actually closed (0% chance of double-darkness!)
   if (-not $remaining -or $remaining.Count -eq 0) {
     $dimOpacity = [Math]::Max(0.05, [Math]::Min(0.90, [Math]::Round($dimmerAlpha / 255.0, 3)))
     $ghostDimmer = New-Object System.Windows.Forms.Form
     $ghostDimmer.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
-    $ghostDimmer.StartPosition   = [System.Windows.Forms.FormStartPosition]::Manual
-    $ghostDimmer.Bounds          = $bounds
-    $ghostDimmer.TopMost         = $true
-    $ghostDimmer.ShowInTaskbar   = $false
-    $ghostDimmer.BackColor       = [System.Drawing.Color]::Black
-    $ghostDimmer.Opacity         = $dimOpacity
+    $ghostDimmer.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
+    $ghostDimmer.Bounds = $bounds; $ghostDimmer.TopMost = $true; $ghostDimmer.ShowInTaskbar = $false
+    $ghostDimmer.BackColor = [System.Drawing.Color]::Black; $ghostDimmer.Opacity = $dimOpacity
     $ghostDimmer.Show()
-
     try {
       $ex = [PxRecGhost]::GetWindowLong($ghostDimmer.Handle, -20)
       [void][PxRecGhost]::SetWindowLong($ghostDimmer.Handle, -20, ($ex -bor 0x80000 -bor 0x20 -bor 0x08000000))
@@ -151,34 +316,49 @@ if ($extDimPids -and $extDimPids.Count -gt 0 -and $dimmerAlpha -gt 5) {
   }
 }
 
-# Floating Top-Right Ghost Stop Pill (100% Invisible in Recorded MP4!)
+# Ghost Region Guide Border (Visible to User, 100% Invisible in Recorded MP4!)
+$guideForm = $null
+if ($useCrop) {
+  $guideForm = New-Object System.Windows.Forms.Form
+  $guideForm.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+  $guideForm.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
+  $guideForm.Bounds = New-Object System.Drawing.Rectangle(($cropX - 3), ($cropY - 3), ($cropW + 6), ($cropH + 6))
+  $guideForm.TopMost = $true; $guideForm.ShowInTaskbar = $false
+  $guideForm.BackColor = [System.Drawing.Color]::Magenta
+  $guideForm.TransparencyKey = [System.Drawing.Color]::Magenta
+  $guideForm.Add_Paint({
+    $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(244, 63, 94), 3)
+    $_.Graphics.DrawRectangle($pen, 1, 1, $guideForm.Width - 3, $guideForm.Height - 3)
+  })
+  $guideForm.Show()
+  try {
+    $exG = [PxRecGhost]::GetWindowLong($guideForm.Handle, -20)
+    [void][PxRecGhost]::SetWindowLong($guideForm.Handle, -20, ($exG -bor 0x20 -bor 0x08000000))
+    [void][PxRecGhost]::SetWindowDisplayAffinity($guideForm.Handle, 0x00000011)
+  } catch {}
+}
+
+# Top-Right Invisible Ghost Stop Pill
 $pill = New-Object System.Windows.Forms.Form
 $pill.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
-$pill.TopMost = $true
-$pill.ShowInTaskbar = $false
+$pill.TopMost = $true; $pill.ShowInTaskbar = $false
 $pill.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
-$pill.Width = 280
-$pill.Height = 42
-$pill.Left = [Math]::Max(20, $screenW - 296)
-$pill.Top = 10
-$pill.BackColor = [System.Drawing.Color]::FromArgb(15, 23, 42)
-$pill.Opacity = 0.95
+$pill.Width = 290; $pill.Height = 42
+$pill.Left = [Math]::Max(20, $screenW - 306); $pill.Top = 10
+$pill.BackColor = [System.Drawing.Color]::FromArgb(15, 23, 42); $pill.Opacity = 0.95
 
 $lbl = New-Object System.Windows.Forms.Label
 $lbl.ForeColor = [System.Drawing.Color]::FromArgb(248, 250, 252)
 $lbl.Font = New-Object System.Drawing.Font("Segoe UI", 9.0, [System.Drawing.FontStyle]::Bold)
-$lbl.AutoSize = $false
-$lbl.Left = 12; $lbl.Top = 0; $lbl.Width = 168; $lbl.Height = 42
+$lbl.AutoSize = $false; $lbl.Left = 12; $lbl.Top = 0; $lbl.Width = 178; $lbl.Height = 42
 $lbl.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
 $pill.Controls.Add($lbl)
 
 $stopBtn = New-Object System.Windows.Forms.Button
 $stopBtn.Text = "Stop & Rig"
-$stopBtn.Left = 184; $stopBtn.Top = 7; $stopBtn.Width = 86; $stopBtn.Height = 28
-$stopBtn.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$stopBtn.FlatAppearance.BorderSize = 0
-$stopBtn.BackColor = [System.Drawing.Color]::FromArgb(239, 68, 68)
-$stopBtn.ForeColor = [System.Drawing.Color]::White
+$stopBtn.Left = 194; $stopBtn.Top = 7; $stopBtn.Width = 86; $stopBtn.Height = 28
+$stopBtn.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat; $stopBtn.FlatAppearance.BorderSize = 0
+$stopBtn.BackColor = [System.Drawing.Color]::FromArgb(239, 68, 68); $stopBtn.ForeColor = [System.Drawing.Color]::White
 $stopBtn.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Bold)
 $stopBtn.Add_Click({
   $script:stopReq = $true
@@ -194,7 +374,7 @@ try {
     while ([DateTime]::UtcNow -lt $endWait) {
       if ($script:stopReq -or (Test-Path -LiteralPath $script:stopSignal)) { break }
       $rem = [Math]::Ceiling(($endWait - [DateTime]::UtcNow).TotalSeconds)
-      $lbl.Text = "Starting in ${rem}s... Open App!"
+      $lbl.Text = "REC in ${rem}s ($cropW x $cropH)"
       [System.Windows.Forms.Application]::DoEvents()
       Start-Sleep -Milliseconds 60
     }
@@ -202,6 +382,7 @@ try {
 
   $filtersTxt = & $ffmpegExe -hide_banner -filters 2>&1 | Out-String
   $hasDda = $filtersTxt -match "ddagrab"
+  $vfChain = if ($useCrop) { "crop=${cropW}:${cropH}:${cropX}:${cropY},scale=trunc(iw/2)*2:trunc(ih/2)*2" } else { "scale=trunc(iw/2)*2:trunc(ih/2)*2" }
 
   function Start-VideoCapture([bool]$useDda) {
     $vIn = if ($useDda) {
@@ -209,16 +390,11 @@ try {
     } else {
       "-f gdigrab -framerate $Fps -draw_mouse 0 -i desktop"
     }
-    $argsStr = "-y -loglevel error $vIn -an -vf `"scale=trunc(iw/2)*2:trunc(ih/2)*2`" -c:v libx264 -preset ultrafast -crf 20 -pix_fmt yuv420p -movflags +faststart `"$videoOut`""
+    $argsStr = "-y -loglevel error $vIn -an -vf `"$vfChain`" -c:v libx264 -preset ultrafast -crf 20 -pix_fmt yuv420p -movflags +faststart `"$videoOut`""
     $pInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $pInfo.FileName = $ffmpegExe
-    $pInfo.Arguments = $argsStr
-    $pInfo.RedirectStandardInput = $true
-    $pInfo.UseShellExecute = $false
-    $pInfo.CreateNoWindow = $true
-    $proc = New-Object System.Diagnostics.Process
-    $proc.StartInfo = $pInfo
-    $proc.Start() | Out-Null
+    $pInfo.FileName = $ffmpegExe; $pInfo.Arguments = $argsStr
+    $pInfo.RedirectStandardInput = $true; $pInfo.UseShellExecute = $false; $pInfo.CreateNoWindow = $true
+    $proc = New-Object System.Diagnostics.Process; $proc.StartInfo = $pInfo; $proc.Start() | Out-Null
     return $proc
   }
 
@@ -234,93 +410,70 @@ try {
   $sw = [System.Diagnostics.Stopwatch]::StartNew()
   $samples = New-Object System.Collections.Generic.List[object]
   $clicks  = New-Object System.Collections.Generic.List[object]
-  $wasLeftDown = $false
-  $wasRightDown = $false
-  $retriedGdi = $false
+  $wasLeftDown = $false; $wasRightDown = $false; $retriedGdi = $false
 
   while ($true) {
     [System.Windows.Forms.Application]::DoEvents()
     if ($script:stopReq -or (Test-Path -LiteralPath $script:stopSignal)) { break }
-
     if ($vProc.HasExited) {
       if ($usedDda -and -not $retriedGdi -and $sw.Elapsed.TotalSeconds -lt 3.0) {
-        $usedDda = $false
-        $retriedGdi = $true
+        $usedDda = $false; $retriedGdi = $true
         $samples.Clear(); $clicks.Clear()
-        $vProc = Start-VideoCapture -useDda $false
-        $sw.Restart()
-        Start-Sleep -Milliseconds 300
-        continue
+        $vProc = Start-VideoCapture -useDda $false; $sw.Restart(); Start-Sleep -Milliseconds 300; continue
       }
       break
     }
 
     $t = [Math]::Round($sw.Elapsed.TotalSeconds, 3)
     $sec = [int][Math]::Floor($t)
-    $mm = "{0:D2}" -f [int][Math]::Floor($sec / 60)
-    $ss = "{0:D2}" -f ($sec % 60)
-    $lbl.Text = if ($ghostDimmer) { "BRIGHT $mm`:$ss • DimBypass" } else { "GHOST $mm`:$ss • 60 FPS" }
+    $lbl.Text = ("● {0:D2}:{1:D2} • ${cropW}x${cropH}" -f [int][Math]::Floor($sec / 60), ($sec % 60))
 
     $pos = [System.Windows.Forms.Cursor]::Position
+    $rx = [Math]::Max(0, [Math]::Min($cropW, ($pos.X - $cropX)))
+    $ry = [Math]::Max(0, [Math]::Min($cropH, ($pos.Y - $cropY)))
+    $insideRegion = ($pos.X -ge $cropX -and $pos.X -le ($cropX + $cropW) -and $pos.Y -ge $cropY -and $pos.Y -le ($cropY + $cropH))
+
     $btns = [System.Windows.Forms.Control]::MouseButtons
     $leftDown  = ($btns -band [System.Windows.Forms.MouseButtons]::Left) -ne 0
     $rightDown = ($btns -band [System.Windows.Forms.MouseButtons]::Right) -ne 0
 
-    $samples.Add(@{ t = $t; x = $pos.X; y = $pos.Y })
-
-    if ($leftDown -and -not $wasLeftDown) {
-      $clicks.Add(@{ t = $t; x = $pos.X; y = $pos.Y; button = "left" })
+    $samples.Add(@{ t = $t; x = $rx; y = $ry })
+    if ($insideRegion) {
+      if ($leftDown -and -not $wasLeftDown)  { $clicks.Add(@{ t = $t; x = $rx; y = $ry; button = "left" }) }
+      if ($rightDown -and -not $wasRightDown) { $clicks.Add(@{ t = $t; x = $rx; y = $ry; button = "right" }) }
     }
-    if ($rightDown -and -not $wasRightDown) {
-      $clicks.Add(@{ t = $t; x = $pos.X; y = $pos.Y; button = "right" })
-    }
-    $wasLeftDown = $leftDown
-    $wasRightDown = $rightDown
-
+    $wasLeftDown = $leftDown; $wasRightDown = $rightDown
     Start-Sleep -Milliseconds 28
   }
 
-  $lbl.Text = "Saving Bright MP4..."
+  $lbl.Text = "Saving MP4..."
   [System.Windows.Forms.Application]::DoEvents()
-
   if ($vProc -and -not $vProc.HasExited) {
-    try {
-      $vProc.StandardInput.Write("q`n")
-      $vProc.StandardInput.Flush()
-      $vProc.StandardInput.Close()
-      $vProc.WaitForExit(4500) | Out-Null
-    } catch {}
+    try { $vProc.StandardInput.Write("q`n"); $vProc.StandardInput.Flush(); $vProc.StandardInput.Close(); $vProc.WaitForExit(4500) | Out-Null } catch {}
     if (-not $vProc.HasExited) { try { $vProc.Kill() } catch {} }
   }
 
   $payload = @{
-    version      = "1.6.3"
+    version      = "2.1.0"
     fps          = $Fps
-    screenWidth  = $screenW
-    screenHeight = $screenH
+    captureMode  = $capMode
+    screenWidth  = $cropW
+    screenHeight = $cropH
     duration     = [Math]::Round($sw.Elapsed.TotalSeconds, 3)
     samples      = $samples
     clicks       = $clicks
   }
-
-  $jsonStr = $payload | ConvertTo-Json -Depth 5 -Compress
-  [System.IO.File]::WriteAllText($motionOut, $jsonStr, [System.Text.UTF8Encoding]::new($false))
+  [System.IO.File]::WriteAllText($motionOut, ($payload | ConvertTo-Json -Depth 5 -Compress), [System.Text.UTF8Encoding]::new($false))
   [System.IO.File]::WriteAllText($doneSignal, "OK")
 }
 finally {
   foreach ($exe in $relaunchDimExes) {
-    if ($exe -and (Test-Path -LiteralPath $exe)) {
-      try { Start-Process -FilePath $exe | Out-Null } catch {}
-    }
+    if ($exe -and (Test-Path -LiteralPath $exe)) { try { Start-Process -FilePath $exe | Out-Null } catch {} }
   }
-  Start-Sleep -Milliseconds 120
-  if ($ghostDimmer) {
-    try { $ghostDimmer.Close(); $ghostDimmer.Dispose() } catch {}
-  }
+  Start-Sleep -Milliseconds 100
+  if ($guideForm)   { try { $guideForm.Close(); $guideForm.Dispose() } catch {} }
+  if ($ghostDimmer) { try { $ghostDimmer.Close(); $ghostDimmer.Dispose() } catch {} }
   try { $pill.Close(); $pill.Dispose() } catch {}
 }
 
-try {
-  $wsh = New-Object -ComObject WScript.Shell
-  $wsh.AppActivate("Adobe After Effects") | Out-Null
-} catch {}
+try { (New-Object -ComObject WScript.Shell).AppActivate("Adobe After Effects") | Out-Null } catch {}
