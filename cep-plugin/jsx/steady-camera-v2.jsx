@@ -46,6 +46,31 @@
     return {};
   }
 
+  function applyBandicamHdWallpaper(comp, bgPath) {
+    if (!comp || !bgPath) return;
+    try {
+      var imgFile = new File(bgPath);
+      if (!imgFile.exists) return;
+      var io = new ImportOptions(imgFile);
+      var ft = app.project.importFile(io);
+      var bgLayer = null;
+      for (var i = 1; i <= comp.numLayers; i++) {
+        if (comp.layer(i).name.indexOf("01_") === 0 || comp.layer(i).name.indexOf("Backdrop") !== -1) {
+          bgLayer = comp.layer(i);
+        }
+      }
+      var lyr = comp.layers.add(ft);
+      lyr.name = "01B_Bandicam_HD_Wallpaper";
+      if (bgLayer) lyr.moveBefore(bgLayer);
+      else lyr.moveToEnd();
+      var sx = (comp.width / Math.max(1, ft.width)) * 100;
+      var sy = (comp.height / Math.max(1, ft.height)) * 100;
+      var sc = Math.max(sx, sy);
+      lyr.property("ADBE Transform Group").property("ADBE Scale").setValue([sc, sc]);
+      lyr.property("ADBE Transform Group").property("ADBE Position").setValue([comp.width / 2, comp.height / 2]);
+    } catch (_ebg) {}
+  }
+
   function smoothCursorKeysEMA(keys) {
     if (!keys || keys.length < 4) return keys || [];
     var out = [keys[0]];
@@ -88,7 +113,6 @@
     }
   }
 
-  /* ROCK-STEADY SAFE-ZONE CAMERA: 0% mouse-hover shake! Moves ONLY when clicking outside Safe-Box! */
   function buildRockSteadyDolly(comp, events, zoomPct, deadZoneRatio) {
     var camNull = null, curLayer = null;
     for (var l = 1; l <= comp.numLayers; l++) {
@@ -205,15 +229,18 @@
           }
           var baseRaw = baseDispatch(action, encB64(toJson(parsed.payloadFile ? parsed : full)));
           var baseRes = eval("(" + baseRaw + ")");
-          if (baseRes && baseRes.ok && origAuto !== false && camMode !== "static_lock") {
+          if (baseRes && baseRes.ok) {
             var comp = app.project.activeItem;
-            var m = full.motion || {};
-            var evts = (m.clicks || []).concat(m.zoomPins || []);
-            evts.sort(function (a, b) { return a.t - b.t; });
-            app.beginUndoGroup("Rock-Steady Dolly Camera v2");
+            app.beginUndoGroup("Bandicam Wallpaper & Steady Dolly v2.3");
             try {
-              baseRes.autoZoomClusters = buildRockSteadyDolly(comp, evts, zPct, dzRatio);
-              baseRes.cameraMode = "dolly_steady_v2";
+              if (v2Prefs.bgImagePath) applyBandicamHdWallpaper(comp, v2Prefs.bgImagePath);
+              if (origAuto !== false && camMode !== "static_lock") {
+                var m = full.motion || {};
+                var evts = (m.clicks || []).concat(m.zoomPins || []);
+                evts.sort(function (a, b) { return a.t - b.t; });
+                baseRes.autoZoomClusters = buildRockSteadyDolly(comp, evts, zPct, dzRatio);
+                baseRes.cameraMode = "dolly_steady_v2";
+              }
             } finally { app.endUndoGroup(); }
           }
           return toJson(baseRes);
@@ -232,7 +259,7 @@
           for (var k = 2; k <= sc.numKeys; k += 3) evs.push({ t: sc.keyTime(k) });
         }
         var vp = readStudioV2Prefs();
-        app.beginUndoGroup("Apply Rock-Steady Dolly v2");
+        app.beginUndoGroup("Apply Rock-Steady Dolly v2.3");
         try {
           var mv = buildRockSteadyDolly(compA, evs, vp.zoomPercent || 150, vp.deadZoneRatio || 0.65);
           return toJson({ ok: true, compName: compA.name, travelWaypoints: mv });

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Pixopik Motion Studio Pro v2.2</title>
+  <title>Pixopik Motion Studio Pro v2.3</title>
   <link rel="stylesheet" href="./css/style.css" />
   <style>
     .header-right { display: flex; align-items: center; gap: 6px; }
@@ -13,15 +13,23 @@
     }
     .btn-sync:hover { background: #4f46e5; color: #ffffff; border-color: #6366f1; }
     .btn-studio-hero {
-      width: 100%; padding: 13px 14px; font-size: 13px; font-weight: 800;
+      width: 100%; padding: 12px 14px; font-size: 12.8px; font-weight: 800;
       border-radius: 9px; border: 1px solid #38bdf8; cursor: pointer;
       background: linear-gradient(135deg, #0284c7 0%, #4f46e5 100%);
       color: #ffffff; box-shadow: 0 4px 16px rgba(14, 165, 233, 0.35);
-      margin-bottom: 8px; transition: all 0.15s ease;
+      margin-bottom: 6px; transition: all 0.15s ease;
     }
     .btn-studio-hero:hover { filter: brightness(1.1); transform: translateY(-1px); }
-    .studio-note {
-      font-size: 10.5px; color: #94a3b8; text-align: center; margin-bottom: 8px;
+    .btn-bdcam-bridge {
+      width: 100%; padding: 10px 12px; font-size: 12px; font-weight: 800;
+      border-radius: 8px; border: 1px solid #f43f5e; cursor: pointer;
+      background: rgba(225, 29, 72, 0.16); color: #fda4af;
+      margin-bottom: 7px; transition: all 0.15s ease;
+    }
+    .btn-bdcam-bridge:hover { background: #e11d48; color: #ffffff; }
+    .btn-bdcam-bridge.active-watch {
+      background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+      border-color: #6ee7b7; color: #ffffff;
     }
   </style>
 </head>
@@ -31,8 +39,8 @@
       <div class="brand">
         <span class="badge-logo">PX</span>
         <div>
-          <div class="title">Pixopik Motion Studio <span class="pro-pill" id="verPill">v2.2</span></div>
-          <div class="subtitle" id="verSubtitle">AE Post-Production &amp; AI Hub</div>
+          <div class="title">Pixopik Motion Studio <span class="pro-pill" id="verPill">v2.3</span></div>
+          <div class="subtitle" id="verSubtitle">Bandicam Bridge &amp; AE Hub</div>
         </div>
       </div>
       <div class="header-right">
@@ -44,15 +52,14 @@
       </div>
     </header>
 
-    <div id="quickBanner" class="quick-banner">v2.2 Clean Hub • Recording Managed in Floating Studio</div>
+    <div id="quickBanner" class="quick-banner">v2.3 Live • Real Bandicam Bridge + 31 HD Wallpapers + Sounds</div>
 
-    <!-- CARD 1: DEDICATED CAPTURE LAUNCHER + POST-IMPORT -->
+    <!-- CARD 1: CAPTURE STUDIO + REAL BANDICAM AUTO-RIG BRIDGE -->
     <section class="card">
-      <div class="card-title">🎬 Screen Capture &amp; Import</div>
-      <button id="btnOpenRecorderStudio" class="btn-studio-hero">🚀 Launch Recorder Studio (Bandicam UI)</button>
-      <div class="studio-note">Area, Rectangle, Window, Camera, Chrome &amp; Dimmer live inside Recorder Studio.</div>
+      <div class="card-title">🎬 Screen Capture &amp; Bandicam Auto-Rig</div>
+      <button id="btnOpenRecorderStudio" class="btn-studio-hero">🚀 Open Pixopik Recorder Studio</button>
+      <button id="btnRealBandicamBridge" class="btn-bdcam-bridge">🎯 Record via Real Bandicam.exe + Auto-Rig AE</button>
 
-      <!-- Appears ONLY while a recording is actively running -->
       <button id="btnStop" class="btn btn-stop hidden" style="width:100%;margin-bottom:6px;">■ Stop Active Recording &amp; Rig</button>
       <div id="recTimer" class="timer hidden">00:00 • Recording in Progress...</div>
 
@@ -62,12 +69,12 @@
       </div>
 
       <div id="ffmpegBar" class="ffmpeg-bar hidden">
-        <span>FFmpeg needed for 60fps capture</span>
+        <span>FFmpeg needed for built-in capture</span>
         <button id="btnInstallFfmpeg" class="btn-mini">⚡ Auto-Install</button>
       </div>
     </section>
 
-    <!-- CARD 2: TIMELINE CREATOR & POLISH ACTIONS (NO SCROLLING NEEDED!) -->
+    <!-- CARD 2: TIMELINE POLISH -->
     <section class="card">
       <div class="card-title">✨ Timeline Polish &amp; Creator Actions</div>
       <div class="grid-btns">
@@ -82,7 +89,6 @@
       </div>
     </section>
 
-    <!-- CARD 3: CLOUD MCP RELAY & ACTIVITY LOG -->
     <section class="card compact">
       <div class="ws-row">
         <input id="wsUrl" type="text" value="wss://after-effects-mcp.goutamboronew.workers.dev/ws" />
@@ -99,7 +105,7 @@
     </section>
   </div>
 
-  <!-- HIDDEN INTERNAL BRIDGE ELEMENTS (Controlled exclusively by Floating Recorder Studio — Zero UI Duplication!) -->
+  <!-- HIDDEN INTERNAL BRIDGE ELEMENTS -->
   <div id="internalStudioState" style="display:none !important;" aria-hidden="true">
     <input id="chromeUrlInput" type="text" value="https://pixopik.com" />
     <button id="btnLaunchChrome" type="button"></button>
