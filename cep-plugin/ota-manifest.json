@@ -1,11 +1,12 @@
 {
-  "version": "1.6.4",
+  "version": "1.6.5",
   "repo": "thepixopik/after-effects-mcp",
   "branch": "main",
   "files": [
     "ota-manifest.json",
     "index.html",
     "css/style.css",
+    "js/auto-pref.js",
     "js/panel.js",
     "jsx/host.jsx",
     "jsx/pro-studio-rig.jsx",
