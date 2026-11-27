@@ -3,6 +3,8 @@
   var path = require("path");
   var os = require("os");
   var cp = require("child_process");
+  var http = require("http");
+  var urlMod = require("url");
 
   function evalHostScript(code, cb) {
     if (window.__adobe_cep__ && typeof window.__adobe_cep__.evalScript === "function") {
@@ -22,12 +24,14 @@
     return path.normalize(decodeURIComponent(raw));
   }
 
-  var EXT_ROOT    = getExtRoot();
-  var HOST_JSX    = path.join(EXT_ROOT, "jsx", "host.jsx");
-  var PRO_RIG_JSX = path.join(EXT_ROOT, "jsx", "pro-studio-rig.jsx");
-  var REC_SCRIPT  = path.join(EXT_ROOT, "recorder", "capture-session.ps1");
-  var INST_SCRIPT = path.join(EXT_ROOT, "recorder", "install-ffmpeg.ps1");
-  var REC_ROOT    = path.join(os.homedir(), "Videos", "PixopikRecordings");
+  var EXT_ROOT     = getExtRoot();
+  var HOST_JSX     = path.join(EXT_ROOT, "jsx", "host.jsx");
+  var PRO_RIG_JSX  = path.join(EXT_ROOT, "jsx", "pro-studio-rig.jsx");
+  var REC_SCRIPT   = path.join(EXT_ROOT, "recorder", "capture-session.ps1");
+  var GHOST_SCRIPT = path.join(EXT_ROOT, "recorder", "ghost-presenter.ps1");
+  var INST_SCRIPT  = path.join(EXT_ROOT, "recorder", "install-ffmpeg.ps1");
+  var REC_ROOT     = path.join(os.homedir(), "Videos", "PixopikRecordings");
+  var CHROME_EXT_DIR = path.join(REC_ROOT, "Pixopik_Chrome_Extension");
   try { fs.mkdirSync(REC_ROOT, { recursive: true }); } catch (_e) {}
 
   var statusBadge      = document.getElementById("statusBadge");
@@ -44,6 +48,7 @@
   var wallSelect       = document.getElementById("wallpaperSelect");
   var frameSelect      = document.getElementById("frameStyleSelect");
   var chkMicAudio      = document.getElementById("chkMicAudio");
+  var chkAutoGhost     = document.getElementById("chkAutoGhost");
   var chkMotionBlur    = document.getElementById("chkMotionBlur");
 
   function log(msg, level) {
@@ -53,6 +58,96 @@
     logList.insertBefore(row, logList.firstChild);
     while (logList.children.length > 60) logList.removeChild(logList.lastChild);
   }
+
+  // Local Ghost Presenter Command Bridge (127.0.0.1:47832) -> Chrome Extension
+  var cmdEvents = [];
+  var cmdSeq = 0;
+  function pushGhostEvent(tool, extraUrl) {
+    cmdSeq++;
+    cmdEvents.push({ seq: cmdSeq, tool: tool, url: extraUrl || "", ts: Date.now() });
+    if (cmdEvents.length > 40) cmdEvents.shift();
+  }
+
+  try {
+    var bridgeSrv = http.createServer(function (req, res) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Content-Type", "application/json");
+      var parsed = urlMod.parse(req.url || "", true);
+      if (parsed.pathname === "/cmd") {
+        var tl = String(parsed.query.tool || "cursor");
+        var u  = String(parsed.query.url || "");
+        pushGhostEvent(tl, u);
+        log("Ghost Tool -> " + tl + (u ? " (" + u + ")" : ""), "info");
+        res.end(JSON.stringify({ ok: true, seq: cmdSeq }));
+        return;
+      }
+      if (parsed.pathname === "/poll") {
+        var since = parseInt(String(parsed.query.since || "0"), 10) || 0;
+        var fresh = cmdEvents.filter(function (e) { return e.seq > since; });
+        res.end(JSON.stringify({ ok: true, events: fresh }));
+        return;
+      }
+      res.end(JSON.stringify({ ok: true, service: "pixopik-ghost-bridge" }));
+    });
+    bridgeSrv.on("error", function () {});
+    bridgeSrv.listen(47832, "127.0.0.1");
+  } catch (_srvErr) {}
+
+  function psSingleQuote(s) {
+    return "'" + String(s).replace(/'/g, "''") + "'";
+  }
+
+  function spawnEncodedPowerShell(psScriptLine, opts) {
+    var encoded = Buffer.from(psScriptLine, "utf16le").toString("base64");
+    return cp.spawn("powershell.exe", [
+      "-NoProfile", "-ExecutionPolicy", "Bypass", "-STA",
+      "-EncodedCommand", encoded
+    ], Object.assign({ windowsHide: true }, opts || {}));
+  }
+
+  function findChromeExe() {
+    var candidates = [
+      path.join(process.env["PROGRAMFILES"] || "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe"),
+      path.join(process.env["PROGRAMFILES(X86)"] || "C:\\Program Files (x86)", "Google", "Chrome", "Application", "chrome.exe"),
+      path.join(process.env.LOCALAPPDATA || "", "Google", "Chrome", "Application", "chrome.exe")
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+      if (fs.existsSync(candidates[i])) return candidates[i];
+    }
+    return null;
+  }
+
+  var ghostBarProc = null;
+  function openGhostToolbar() {
+    if (ghostBarProc && !ghostBarProc.killed) {
+      try { ghostBarProc.kill(); } catch (_e) {}
+    }
+    ghostBarProc = spawnEncodedPowerShell("& " + psSingleQuote(GHOST_SCRIPT) + " -Port 47832");
+    ghostBarProc.on("exit", function () { ghostBarProc = null; });
+    log("Ghost Toolbar active (visible to you, 100% invisible in MP4!)", "ok");
+  }
+
+  document.getElementById("btnLaunchChrome").onclick = function () {
+    var chromeExe = findChromeExe();
+    if (!chromeExe) return log("Google Chrome not found in standard paths.", "err");
+    var targetUrl = (document.getElementById("chromeUrlInput").value || "https://pixopik.com").trim();
+    if (!/^https?:\/\//i.test(targetUrl)) targetUrl = "https://" + targetUrl;
+    cp.spawn(chromeExe, ["--app=" + targetUrl], { detached: true, windowsHide: false });
+    log("Opened Clean Signed-In Chrome (Zero Extension/Bookmark bars)!", "ok");
+  };
+
+  document.getElementById("btnGhostBar").onclick = function () {
+    openGhostToolbar();
+  };
+
+  document.getElementById("btnCopyExtPath").onclick = function () {
+    try { cp.spawn("explorer.exe", [CHROME_EXT_DIR], { detached: true }); } catch (_e) {}
+    var chromeExe = findChromeExe();
+    if (chromeExe) {
+      try { cp.spawn(chromeExe, ["chrome://extensions/"], { detached: true }); } catch (_e2) {}
+    }
+    log("Opened extension folder! In Chrome Extensions -> Developer Mode ON -> Load unpacked -> select Pixopik_Chrome_Extension", "ok");
+  };
 
   function loadExtendScripts(cb) {
     var p1 = HOST_JSX.replace(/\\/g, "/");
@@ -83,8 +178,8 @@
 
   loadExtendScripts(function (res) {
     if (String(res).indexOf("OK") === 0) {
-      quickBanner.textContent = "v1.2 Ready • Smooth Travel Glide + YouTube + Live Mic";
-      log("Studio Pro v1.2 engine loaded (Smooth Travel Default!)", "ok");
+      quickBanner.textContent = "v1.3 Ready • Clean Signed-In Chrome + Ghost Toolbar";
+      log("Studio Pro v1.3 engine loaded (Clean Chrome + Ghost Mode!)", "ok");
     } else {
       log("Engine init: " + res, "err");
     }
@@ -105,18 +200,6 @@
         log("SaaS Promo Mode ON (84% Frame • Smooth Travel + 3D)", "ok");
       }
     };
-  }
-
-  function psSingleQuote(s) {
-    return "'" + String(s).replace(/'/g, "''") + "'";
-  }
-
-  function spawnEncodedPowerShell(psScriptLine, opts) {
-    var encoded = Buffer.from(psScriptLine, "utf16le").toString("base64");
-    return cp.spawn("powershell.exe", [
-      "-NoProfile", "-ExecutionPolicy", "Bypass", "-STA",
-      "-EncodedCommand", encoded
-    ], Object.assign({ windowsHide: true }, opts || {}));
   }
 
   function hasFfmpegInstalled() {
@@ -252,6 +335,9 @@
       log("Click Auto-Install FFmpeg first.", "err");
       return;
     }
+    if (chkAutoGhost && chkAutoGhost.checked && !ghostBarProc) {
+      openGhostToolbar();
+    }
     var stamp = new Date().toISOString().replace(/[:.]/g, "-");
     var sessionDir = path.join(REC_ROOT, "rec_" + stamp);
     fs.mkdirSync(sessionDir, { recursive: true });
@@ -284,17 +370,17 @@
     btnStop.classList.remove("hidden");
     recTimer.classList.remove("hidden");
     startEpoch = Date.now() + (countdownSec * 1000);
-    log("Recorder started (" + (useMicFlag === "1" ? "60fps + Live Mic" : "60fps Screen") + ")...", "ok");
+    log("Ghost Recorder started (" + (useMicFlag === "1" ? "60fps + Live Mic" : "60fps Screen") + ")...", "ok");
 
     timerInterval = setInterval(function () {
       if (!activeSession || sess._finalized) return;
       var diff = Math.floor((Date.now() - startEpoch) / 1000);
       if (diff < 0) {
-        recTimer.textContent = "Starting in " + Math.abs(diff) + "s • Switch to your app!";
+        recTimer.textContent = "Starting in " + Math.abs(diff) + "s • Switch to Clean Chrome!";
       } else {
         var sec = String(diff % 60).padStart(2, "0");
         var min = String(Math.floor(diff / 60)).padStart(2, "0");
-        recTimer.textContent = min + ":" + sec + (useMicFlag === "1" ? " • REC 60fps + Mic ON" : " • REC 60fps");
+        recTimer.textContent = min + ":" + sec + (useMicFlag === "1" ? " • GHOST REC + Mic ON" : " • GHOST REC 60fps");
       }
       if (fs.existsSync(sess.doneSignal)) {
         finalizeSessionUI(sess, "done-signal");
@@ -392,7 +478,7 @@
     var url = (wsInput.value || "").trim();
     setStatus(false, "Connecting...");
     ws = new WebSocket(url);
-    ws.onopen = function () { setStatus(true, "Pro v1.2 Live"); log("Connected to Cloud MCP Relay!", "ok"); };
+    ws.onopen = function () { setStatus(true, "Pro v1.3 Live"); log("Connected to Cloud MCP Relay!", "ok"); };
     ws.onmessage = async function (ev) {
       var msg;
       try { msg = JSON.parse(ev.data); } catch (_e) { return; }

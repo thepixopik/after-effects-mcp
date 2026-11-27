@@ -12,7 +12,7 @@
         <span class="badge-logo">PX</span>
         <div>
           <div class="title">Pixopik Motion Studio <span class="pro-pill">PRO</span></div>
-          <div class="subtitle">SaaS &amp; YouTube Studio • v1.2</div>
+          <div class="subtitle">Clean Chrome + Ghost Mode • v1.3</div>
         </div>
       </div>
       <div id="statusBadge" class="status disconnected">
@@ -21,7 +21,19 @@
       </div>
     </header>
 
-    <div id="quickBanner" class="quick-banner">v1.2 Ready • Smooth Travel Glide + YouTube + Live Mic</div>
+    <div id="quickBanner" class="quick-banner">v1.3 Ready • Clean Signed-In Chrome + Ghost Toolbar</div>
+
+    <section class="card">
+      <div class="card-title">🌐 Clean Signed-In Studio Chrome + Ghost Bar</div>
+      <div class="ws-row">
+        <input id="chromeUrlInput" type="text" value="https://pixopik.com" placeholder="https://your-site.com" />
+        <button id="btnCopyExtPath" class="btn-mini" title="Open Chrome Extension Folder">🧩 Setup Ext</button>
+      </div>
+      <div class="btn-row">
+        <button id="btnLaunchChrome" class="btn btn-secondary">🧼 Open Clean Chrome</button>
+        <button id="btnGhostBar" class="btn btn-secondary">👻 Open Ghost Toolbar</button>
+      </div>
+    </section>
 
     <section class="card">
       <div class="card-title">1. Studio Screen + Mic Recorder (60 FPS)</div>
@@ -84,6 +96,7 @@
 
       <div class="toggles">
         <label><input type="checkbox" id="chkMicAudio" /> 🎙️ Live Mic Voiceover</label>
+        <label><input type="checkbox" id="chkAutoGhost" checked /> 👻 Auto Ghost Bar</label>
         <label><input type="checkbox" id="chkAutoZoom" checked /> Smart Camera Motion</label>
         <label><input type="checkbox" id="chkVectorCursor" checked /> Crisp Vector Cursor</label>
         <label><input type="checkbox" id="chkRipples" checked /> Click Ripples</label>
@@ -94,7 +107,7 @@
         <button id="btnRecord" class="btn btn-record">● Start Studio Record</button>
         <button id="btnStop" class="btn btn-stop hidden">■ Stop &amp; Auto-Rig Studio</button>
       </div>
-      <div id="recTimer" class="timer hidden">00:00 • Floating Stop Pill Active...</div>
+      <div id="recTimer" class="timer hidden">00:00 • Ghost Stop Pill Active...</div>
 
       <div class="btn-row sub-actions">
         <button id="btnRigLatest" class="btn btn-secondary">✨ Auto-Rig Latest MP4</button>
