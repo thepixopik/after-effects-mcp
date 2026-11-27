@@ -57,9 +57,7 @@
     var p1 = HOST_JSX.replace(/\\/g, "/");
     var p2 = PRO_RIG_JSX.replace(/\\/g, "/");
     var loader = 'try { $.evalFile(new File("' + p1 + '")); $.evalFile(new File("' + p2 + '")); "OK"; } catch(e) { "ERR:" + e; }';
-    evalHostScript(loader, function (res) {
-      if (cb) cb(res);
-    });
+    evalHostScript(loader, function (res) { if (cb) cb(res); });
   }
 
   function evalJSX(action, argsObj) {
@@ -84,8 +82,8 @@
 
   loadExtendScripts(function (res) {
     if (String(res).indexOf("OK") === 0) {
-      quickBanner.textContent = "v1.1 Ready • SaaS Promo + YouTube Tutorial + Live Mic";
-      log("Studio Pro v1.1 engine loaded (SaaS + YouTube + Mic)", "ok");
+      quickBanner.textContent = "v1.1.1 Ready • SaaS Promo + YouTube + Space-Safe Stop";
+      log("Studio Pro v1.1.1 engine loaded!", "ok");
     } else {
       log("Engine init: " + res, "err");
     }
@@ -99,13 +97,25 @@
       if (isYT) {
         wallSelect.value = "dark_carbon";
         frameSelect.value = "minimal_rounded";
-        log("Switched to YouTube Tutorial Mode (95% Big Screen • Flat 145% Zoom • Mic ON)", "ok");
+        log("YouTube Tutorial Mode ON (95% Big Screen • Flat 145% Zoom • Mic ON)", "ok");
       } else {
         wallSelect.value = "cosmic_indigo";
         frameSelect.value = "macos_glass";
-        log("Switched to SaaS Promo Mode (84% Frame • 3D + 178% Zoom)", "ok");
+        log("SaaS Promo Mode ON (84% Frame • 3D + 178% Zoom)", "ok");
       }
     };
+  }
+
+  function psSingleQuote(s) {
+    return "'" + String(s).replace(/'/g, "''") + "'";
+  }
+
+  function spawnEncodedPowerShell(psScriptLine, opts) {
+    var encoded = Buffer.from(psScriptLine, "utf16le").toString("base64");
+    return cp.spawn("powershell.exe", [
+      "-NoProfile", "-ExecutionPolicy", "Bypass", "-STA",
+      "-EncodedCommand", encoded
+    ], Object.assign({ windowsHide: true }, opts || {}));
   }
 
   function hasFfmpegInstalled() {
@@ -129,7 +139,7 @@
 
   document.getElementById("btnInstallFfmpeg").onclick = function () {
     log("Installing FFmpeg via Windows Winget...", "info");
-    var ps = cp.spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", INST_SCRIPT], { windowsHide: true });
+    var ps = spawnEncodedPowerShell("& " + psSingleQuote(INST_SCRIPT));
     ps.on("close", function () {
       if (hasFfmpegInstalled()) {
         ffmpegBar.classList.add("hidden");
@@ -143,9 +153,7 @@
     var out = [samples[0]], last = samples[0];
     for (var i = 1; i < samples.length - 1; i++) {
       var s = samples[i];
-      var dt = s.t - last.t;
-      var dist = Math.hypot(s.x - last.x, s.y - last.y);
-      if (dt >= (stepSec || 0.032) || dist >= 16) {
+      if ((s.t - last.t) >= (stepSec || 0.032) || Math.hypot(s.x - last.x, s.y - last.y) >= 16) {
         out.push(s);
         last = s;
       }
@@ -165,7 +173,9 @@
       for (var i = 0; i < entries.length; i++) {
         var mp4 = path.join(entries[i].dir, "screen.mp4");
         var mot = path.join(entries[i].dir, "motion.json");
-        if (fs.existsSync(mp4)) return { dir: entries[i].dir, videoPath: mp4, motionPath: fs.existsSync(mot) ? mot : null };
+        if (fs.existsSync(mp4) && fs.statSync(mp4).size > 1000) {
+          return { dir: entries[i].dir, videoPath: mp4, motionPath: fs.existsSync(mot) ? mot : null };
+        }
       }
     } catch (_e) {}
     return null;
@@ -195,7 +205,7 @@
         var step = (motion.duration && motion.duration > 180) ? 0.048 : 0.032;
         motion.cursorKeys = simplifyTrajectory(motion.samples || [], step);
         delete motion.samples;
-      } catch (e) { log("Motion telemetry parse warning: " + e.message, "err"); }
+      } catch (e) { log("Motion telemetry warning: " + e.message, "err"); }
     }
     var payload = Object.assign({ videoPath: bundle.videoPath.replace(/\\/g, "/"), motion: motion }, currentStudioPrefs(), overrides || {});
     log("Building " + (payload.editMode === "youtube_tutorial" ? "YouTube Tutorial" : "SaaS Promo") + " timeline...", "info");
@@ -208,7 +218,31 @@
     return res;
   }
 
-  var activeSession = null, timerInterval = null, startEpoch = 0;
+  var activeSession = null, timerInterval = null, stopWatchdog = null, startEpoch = 0;
+
+  async function finalizeSessionUI(sess, reason) {
+    if (!sess || sess._finalized) return;
+    sess._finalized = true;
+    if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+    if (stopWatchdog) { clearTimeout(stopWatchdog); stopWatchdog = null; }
+    btnStop.classList.add("hidden");
+    btnRecord.classList.remove("hidden");
+    recTimer.classList.add("hidden");
+    activeSession = null;
+
+    var status = "";
+    try { if (fs.existsSync(sess.doneSignal)) status = fs.readFileSync(sess.doneSignal, "utf8").trim(); } catch (_e) {}
+    if (status.indexOf("ERROR:") === 0) {
+      log("Recorder error: " + status, "err");
+      return;
+    }
+    if (fs.existsSync(sess.videoPath) && fs.statSync(sess.videoPath).size > 1000) {
+      log("Capture saved (" + (reason || "clean") + ")! Auto-rigging...", "ok");
+      await autoRigBundle(sess);
+    } else {
+      log("Recording stopped (no video frames written).", "err");
+    }
+  }
 
   btnRecord.onclick = function () {
     if (!hasFfmpegInstalled()) {
@@ -222,22 +256,27 @@
 
     var countdownSec = parseInt(document.getElementById("countdownSelect").value || "3", 10);
     var useMicFlag = chkMicAudio.checked ? "1" : "0";
-    activeSession = {
+
+    var psCmd = "& " + psSingleQuote(REC_SCRIPT) +
+      " -SessionDir " + psSingleQuote(sessionDir) +
+      " -Fps 60 -Countdown " + String(countdownSec) +
+      " -UseMic " + useMicFlag;
+
+    var psProc = spawnEncodedPowerShell(psCmd);
+    var sess = {
       dir: sessionDir,
+      proc: psProc,
       stopSignal: path.join(sessionDir, "stop.signal"),
       doneSignal: path.join(sessionDir, "done.signal"),
       videoPath: path.join(sessionDir, "screen.mp4"),
-      motionPath: path.join(sessionDir, "motion.json")
+      motionPath: path.join(sessionDir, "motion.json"),
+      _finalized: false
     };
+    activeSession = sess;
 
-    cp.spawn("powershell.exe", [
-      "-NoProfile", "-ExecutionPolicy", "Bypass", "-STA",
-      "-File", REC_SCRIPT,
-      "-SessionDir", sessionDir,
-      "-Fps", "60",
-      "-Countdown", String(countdownSec),
-      "-UseMic", useMicFlag
-    ], { detached: true, windowsHide: true });
+    psProc.on("exit", function () {
+      setTimeout(function () { finalizeSessionUI(sess, "process-exit"); }, 350);
+    });
 
     btnRecord.classList.add("hidden");
     btnStop.classList.remove("hidden");
@@ -245,8 +284,8 @@
     startEpoch = Date.now() + (countdownSec * 1000);
     log("Recorder started (" + (useMicFlag === "1" ? "60fps + Live Mic" : "60fps Screen") + ")...", "ok");
 
-    var finishing = false;
-    timerInterval = setInterval(async function () {
+    timerInterval = setInterval(function () {
+      if (!activeSession || sess._finalized) return;
       var diff = Math.floor((Date.now() - startEpoch) / 1000);
       if (diff < 0) {
         recTimer.textContent = "Starting in " + Math.abs(diff) + "s • Switch to your app!";
@@ -255,31 +294,33 @@
         var min = String(Math.floor(diff / 60)).padStart(2, "0");
         recTimer.textContent = min + ":" + sec + (useMicFlag === "1" ? " • REC 60fps + Mic ON" : " • REC 60fps");
       }
-
-      if (!finishing && activeSession && fs.existsSync(activeSession.doneSignal)) {
-        finishing = true;
-        clearInterval(timerInterval);
-        btnStop.classList.add("hidden");
-        btnRecord.classList.remove("hidden");
-        recTimer.classList.add("hidden");
-
-        var status = "";
-        try { status = fs.readFileSync(activeSession.doneSignal, "utf8").trim(); } catch (_e) {}
-        if (status.indexOf("ERROR:") === 0) {
-          log("Recorder error: " + status, "err");
-        } else if (fs.existsSync(activeSession.videoPath)) {
-          log("Capture saved! Auto-rigging in After Effects...", "ok");
-          await autoRigBundle(activeSession);
-        }
-        activeSession = null;
+      if (fs.existsSync(sess.doneSignal)) {
+        finalizeSessionUI(sess, "done-signal");
       }
     }, 350);
   };
 
   btnStop.onclick = function () {
-    if (!activeSession) return;
-    recTimer.textContent = "Finalizing MP4 & Auto-Rigging...";
-    try { fs.writeFileSync(activeSession.stopSignal, "STOP", "utf8"); } catch (_e) {}
+    if (!activeSession) {
+      btnStop.classList.add("hidden");
+      btnRecord.classList.remove("hidden");
+      recTimer.classList.add("hidden");
+      return;
+    }
+    var sess = activeSession;
+    recTimer.textContent = "Stopping & Finalizing MP4...";
+    try { fs.writeFileSync(sess.stopSignal, "STOP", "utf8"); } catch (_e) {}
+
+    if (stopWatchdog) clearTimeout(stopWatchdog);
+    stopWatchdog = setTimeout(function () {
+      if (sess._finalized) return;
+      log("Applying safe stop fallback...", "info");
+      try { cp.spawnSync("taskkill.exe", ["/IM", "ffmpeg.exe"], { windowsHide: true }); } catch (_k1) {}
+      setTimeout(function () {
+        try { if (sess.proc && !sess.proc.killed) sess.proc.kill(); } catch (_k2) {}
+        finalizeSessionUI(sess, "watchdog");
+      }, 1200);
+    }, 5500);
   };
 
   document.getElementById("btnRigLatest").onclick = async function () {
@@ -346,7 +387,7 @@
     var url = (wsInput.value || "").trim();
     setStatus(false, "Connecting...");
     ws = new WebSocket(url);
-    ws.onopen = function () { setStatus(true, "Pro v1.1 Live"); log("Connected to Cloud MCP Relay!", "ok"); };
+    ws.onopen = function () { setStatus(true, "Pro v1.1.1 Live"); log("Connected to Cloud MCP Relay!", "ok"); };
     ws.onmessage = async function (ev) {
       var msg;
       try { msg = JSON.parse(ev.data); } catch (_e) { return; }
