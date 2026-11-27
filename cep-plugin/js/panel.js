@@ -1,8 +1,9 @@
 (function () {
-  var fs = require("fs");
-  var path = require("path");
-  var os = require("os");
-  var cp = require("child_process");
+  var fs    = require("fs");
+  var path  = require("path");
+  var os    = require("os");
+  var cp    = require("child_process");
+  var https = require("https");
 
   function evalHostScript(code, cb) {
     if (window.__adobe_cep__ && typeof window.__adobe_cep__.evalScript === "function") {
@@ -23,6 +24,7 @@
   }
 
   var EXT_ROOT       = getExtRoot();
+  var OTA_SHA_FILE   = path.join(EXT_ROOT, ".ota_sha");
   var HOST_JSX       = path.join(EXT_ROOT, "jsx", "host.jsx");
   var PRO_RIG_JSX    = path.join(EXT_ROOT, "jsx", "pro-studio-rig.jsx");
   var REC_SCRIPT     = path.join(EXT_ROOT, "recorder", "capture-session.ps1");
@@ -30,6 +32,7 @@
   var BROWSER_SCRIPT = path.join(EXT_ROOT, "recorder", "studio-browser.ps1");
   var INST_SCRIPT    = path.join(EXT_ROOT, "recorder", "install-ffmpeg.ps1");
   var REC_ROOT       = path.join(os.homedir(), "Videos", "PixopikRecordings");
+  var GH_REPO        = "thepixopik/after-effects-mcp";
   try { fs.mkdirSync(REC_ROOT, { recursive: true }); } catch (_e) {}
 
   var statusBadge      = document.getElementById("statusBadge");
@@ -48,6 +51,7 @@
   var chkAutoRigOnStop = document.getElementById("chkAutoRigOnStop");
   var chkClickSfx      = document.getElementById("chkClickSfx");
   var chkAutoGhost     = document.getElementById("chkAutoGhost");
+  var btnOtaSync       = document.getElementById("btnOtaSync");
 
   function log(msg, level) {
     var row = document.createElement("div");
@@ -55,6 +59,122 @@
     row.textContent = "[" + new Date().toLocaleTimeString() + "] " + msg;
     logList.insertBefore(row, logList.firstChild);
     while (logList.children.length > 60) logList.removeChild(logList.lastChild);
+  }
+
+  /* =========================================================================
+   * LIVE CLOUD OTA AUTO-UPDATER (Zero ZIP Download / Zero INSTALL_PLUGIN.bat!)
+   * ========================================================================= */
+  function httpsGetBuffer(url, redirects) {
+    return new Promise(function (resolve, reject) {
+      if ((redirects || 0) > 4) return reject(new Error("Too many redirects"));
+      var req = https.get(url, {
+        headers: {
+          "User-Agent": "Pixopik-Motion-Studio-OTA/1.6",
+          "Cache-Control": "no-cache"
+        }
+      }, function (res) {
+        if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
+          res.resume();
+          return resolve(httpsGetBuffer(res.headers.location, (redirects || 0) + 1));
+        }
+        if (res.statusCode !== 200) {
+          res.resume();
+          return reject(new Error("HTTP " + res.statusCode + " for " + url));
+        }
+        var chunks = [];
+        res.on("data", function (c) { chunks.push(c); });
+        res.on("end", function () { resolve(Buffer.concat(chunks)); });
+      });
+      req.on("error", reject);
+      req.setTimeout(10000, function () { req.destroy(new Error("Timeout")); });
+    });
+  }
+
+  async function fetchLatestCommitSha() {
+    try {
+      var buf = await httpsGetBuffer("https://api.github.com/repos/" + GH_REPO + "/commits/main");
+      var parsed = JSON.parse(buf.toString("utf8"));
+      if (parsed && parsed.sha) return parsed.sha;
+    } catch (_e) {}
+    return null;
+  }
+
+  var otaBusy = false;
+  async function runOtaUpdate(opts) {
+    opts = opts || {};
+    if (otaBusy) return { ok: false, message: "Sync already running" };
+    otaBusy = true;
+    if (btnOtaSync) btnOtaSync.textContent = "⏳...";
+    try {
+      var latestSha = await fetchLatestCommitSha();
+      var localSha = "";
+      try { if (fs.existsSync(OTA_SHA_FILE)) localSha = fs.readFileSync(OTA_SHA_FILE, "utf8").trim(); } catch (_e) {}
+
+      if (!opts.force && latestSha && localSha === latestSha) {
+        if (!opts.silent) log("Plugin already on latest commit (" + latestSha.slice(0, 7) + ")!", "ok");
+        if (btnOtaSync) btnOtaSync.textContent = "🔄 Sync";
+        otaBusy = false;
+        return { ok: true, upToDate: true, commit: latestSha.slice(0, 7) };
+      }
+
+      var ref = latestSha || ("main?t=" + Date.now());
+      var rawBase = latestSha
+        ? ("https://raw.githubusercontent.com/" + GH_REPO + "/" + latestSha + "/cep-plugin/")
+        : ("https://raw.githubusercontent.com/" + GH_REPO + "/main/cep-plugin/");
+
+      log("Pulling live cloud update (" + (latestSha ? latestSha.slice(0, 7) : "main") + ")...", "info");
+
+      var defaultFiles = [
+        "ota-manifest.json", "index.html", "css/style.css", "js/panel.js",
+        "jsx/host.jsx", "jsx/pro-studio-rig.jsx",
+        "recorder/capture-session.ps1", "recorder/ghost-presenter.ps1",
+        "recorder/studio-browser.ps1", "recorder/install-ffmpeg.ps1"
+      ];
+      var fileList = defaultFiles;
+      var remoteVer = "1.6+";
+
+      try {
+        var manBuf = await httpsGetBuffer(rawBase + "ota-manifest.json" + (latestSha ? "" : ("?t=" + Date.now())));
+        var man = JSON.parse(manBuf.toString("utf8"));
+        if (man && Array.isArray(man.files) && man.files.length > 0) fileList = man.files;
+        if (man && man.version) remoteVer = man.version;
+      } catch (_em) {}
+
+      var updatedCount = 0;
+      for (var i = 0; i < fileList.length; i++) {
+        var rel = fileList[i].replace(/^\/+/, "");
+        var url = rawBase + rel + (latestSha ? "" : ("?t=" + Date.now()));
+        var fileBuf = await httpsGetBuffer(url);
+        if (fileBuf && fileBuf.length > 5) {
+          var dest = path.join(EXT_ROOT, rel);
+          fs.mkdirSync(path.dirname(dest), { recursive: true });
+          fs.writeFileSync(dest, fileBuf);
+          updatedCount++;
+        }
+      }
+
+      if (latestSha) {
+        try { fs.writeFileSync(OTA_SHA_FILE, latestSha, "utf8"); } catch (_es) {}
+      }
+
+      loadExtendScripts(function () {});
+      log("Updated " + updatedCount + " files (v" + remoteVer + ")! Reloading panel...", "ok");
+
+      setTimeout(function () {
+        window.location.reload();
+      }, 450);
+
+      return { ok: true, updated: true, version: remoteVer, commit: latestSha ? latestSha.slice(0, 7) : "main", filesUpdated: updatedCount };
+    } catch (err) {
+      log("OTA Sync error: " + (err && err.message ? err.message : err), "err");
+      if (btnOtaSync) btnOtaSync.textContent = "🔄 Sync";
+      otaBusy = false;
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  }
+
+  if (btnOtaSync) {
+    btnOtaSync.onclick = function () { runOtaUpdate({ force: true, silent: false }); };
   }
 
   function psSingleQuote(s) {
@@ -69,7 +189,6 @@
     ], Object.assign({ windowsHide: true }, opts || {}));
   }
 
-  /* Ultra-Fast Node.js Single-Track Tactile Click SFX Synthesizer (Zero AE Layer Bloat!) */
   function buildSingleClickTrackWav(clicks, durationSec, outWavPath) {
     if (!clicks || !clicks.length) return null;
     var sr = 22050;
@@ -91,8 +210,7 @@
       tpl[j] = Math.round(s * 32767);
     }
 
-    var lastClickT = -1;
-    var placed = 0;
+    var lastClickT = -1, placed = 0;
     for (var c = 0; c < clicks.length; c++) {
       var ct = clicks[c].t;
       if (ct < 0 || ct - lastClickT < 0.06) continue;
@@ -110,18 +228,10 @@
 
     var dataByteLen = pcm.byteLength;
     var wav = Buffer.alloc(44 + dataByteLen);
-    wav.write("RIFF", 0);
-    wav.writeUInt32LE(36 + dataByteLen, 4);
-    wav.write("WAVE", 8);
-    wav.write("fmt ", 12);
-    wav.writeUInt32LE(16, 16);
-    wav.writeUInt16LE(1, 20);
-    wav.writeUInt16LE(1, 22);
-    wav.writeUInt32LE(sr, 24);
-    wav.writeUInt32LE(sr * 2, 28);
-    wav.writeUInt16LE(2, 32);
-    wav.writeUInt16LE(16, 34);
-    wav.write("data", 36);
+    wav.write("RIFF", 0); wav.writeUInt32LE(36 + dataByteLen, 4); wav.write("WAVE", 8);
+    wav.write("fmt ", 12); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20);
+    wav.writeUInt16LE(1, 22); wav.writeUInt32LE(sr, 24); wav.writeUInt32LE(sr * 2, 28);
+    wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write("data", 36);
     wav.writeUInt32LE(dataByteLen, 40);
     Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).copy(wav, 44);
     fs.writeFileSync(outWavPath, wav);
@@ -181,11 +291,12 @@
 
   loadExtendScripts(function (res) {
     if (String(res).indexOf("OK") === 0) {
-      quickBanner.textContent = "v1.5.2 Turbo • Instant Rig + Crisp Click SFX + TTS Ready";
-      log("Turbo v1.5.2 ready (Batch Keyframes + Single-Track Click SFX!)", "ok");
+      log("OTA v1.6 engine ready (Zero-Download Auto-Sync ON!)", "ok");
     } else {
       log("Engine init: " + res, "err");
     }
+    /* Silent background startup check for newer GitHub commits! */
+    setTimeout(function () { runOtaUpdate({ force: false, silent: true }); }, 1200);
   });
 
   if (modeSelect) {
@@ -236,20 +347,13 @@
   function simplifyTrajectoryTurbo(samples, minStepSec) {
     if (!samples || !samples.length) return [];
     var step = minStepSec || 0.055;
-    var out = [samples[0]];
-    var lastKept = samples[0];
-    var wasIdle = false;
-
+    var out = [samples[0]], lastKept = samples[0], wasIdle = false;
     for (var i = 1; i < samples.length - 1; i++) {
       var s = samples[i];
       if (s.t <= lastKept.t + 0.012) continue;
       var dist = Math.hypot(s.x - lastKept.x, s.y - lastKept.y);
       var dt   = s.t - lastKept.t;
-
-      if (dist < 4.5) {
-        wasIdle = true;
-        continue;
-      }
+      if (dist < 4.5) { wasIdle = true; continue; }
       if (wasIdle && samples[i - 1] && samples[i - 1].t > lastKept.t + 0.04) {
         var anchor = samples[i - 1];
         out.push({ t: Number(anchor.t.toFixed(3)), x: anchor.x, y: anchor.y });
@@ -273,7 +377,6 @@
         var st = fs.statSync(full);
         return st.isDirectory() ? { name: name, dir: full, mtime: st.mtimeMs } : null;
       }).filter(Boolean).sort(function (a, b) { return b.mtime - a.mtime; });
-
       for (var i = 0; i < entries.length; i++) {
         var mp4 = path.join(entries[i].dir, "screen.mp4");
         var mot = path.join(entries[i].dir, "motion.json");
@@ -303,9 +406,7 @@
   }
 
   async function autoRigBundle(bundle, overrides) {
-    var t0 = Date.now();
-    var motion = null;
-    var clickTrackPath = null;
+    var t0 = Date.now(), motion = null, clickTrackPath = null;
     var prefs = Object.assign({}, currentStudioPrefs(), overrides || {});
     var sessFolder = bundle.dir || path.dirname(bundle.videoPath) || os.tmpdir();
 
@@ -317,7 +418,6 @@
         var step = dur > 240 ? 0.08 : (dur > 90 ? 0.065 : 0.05);
         motion.cursorKeys = simplifyTrajectoryTurbo(motion.samples || [], step);
         delete motion.samples;
-
         if (prefs.clickSfx !== false && motion.clicks && motion.clicks.length > 0) {
           var wavOut = path.join(sessFolder, "clicks_sfx_track.wav");
           var built = buildSingleClickTrackWav(motion.clicks, dur, wavOut);
@@ -359,10 +459,7 @@
 
     var status = "";
     try { if (fs.existsSync(sess.doneSignal)) status = fs.readFileSync(sess.doneSignal, "utf8").trim(); } catch (_e) {}
-    if (status.indexOf("ERROR:") === 0) {
-      log("Recorder error: " + status, "err");
-      return;
-    }
+    if (status.indexOf("ERROR:") === 0) { log("Recorder error: " + status, "err"); return; }
     if (fs.existsSync(sess.videoPath) && fs.statSync(sess.videoPath).size > 1000) {
       if (chkAutoRigOnStop && !chkAutoRigOnStop.checked) {
         log("Saved MP4! (Click 'Turbo-Rig Latest MP4' whenever ready)", "ok");
@@ -375,27 +472,17 @@
   }
 
   btnRecord.onclick = function () {
-    if (!hasFfmpegInstalled()) {
-      ffmpegBar.classList.remove("hidden");
-      log("Click Auto-Install FFmpeg first.", "err");
-      return;
-    }
-    if (chkAutoGhost && chkAutoGhost.checked && !ghostBarProc) {
-      openGhostToolbar();
-    }
+    if (!hasFfmpegInstalled()) { ffmpegBar.classList.remove("hidden"); log("Click Auto-Install FFmpeg first.", "err"); return; }
+    if (chkAutoGhost && chkAutoGhost.checked && !ghostBarProc) openGhostToolbar();
     var stamp = new Date().toISOString().replace(/[:.]/g, "-");
     var sessionDir = path.join(REC_ROOT, "rec_" + stamp);
     fs.mkdirSync(sessionDir, { recursive: true });
 
     var countdownSec = parseInt(document.getElementById("countdownSelect").value || "3", 10);
-    var psCmd = "& " + psSingleQuote(REC_SCRIPT) +
-      " -SessionDir " + psSingleQuote(sessionDir) +
-      " -Fps 60 -Countdown " + String(countdownSec);
-
+    var psCmd = "& " + psSingleQuote(REC_SCRIPT) + " -SessionDir " + psSingleQuote(sessionDir) + " -Fps 60 -Countdown " + String(countdownSec);
     var psProc = spawnEncodedPowerShell(psCmd);
     var sess = {
-      dir: sessionDir,
-      proc: psProc,
+      dir: sessionDir, proc: psProc,
       stopSignal: path.join(sessionDir, "stop.signal"),
       doneSignal: path.join(sessionDir, "done.signal"),
       videoPath: path.join(sessionDir, "screen.mp4"),
@@ -403,44 +490,26 @@
       _finalized: false
     };
     activeSession = sess;
+    psProc.on("exit", function () { setTimeout(function () { finalizeSessionUI(sess, "process-exit"); }, 250); });
 
-    psProc.on("exit", function () {
-      setTimeout(function () { finalizeSessionUI(sess, "process-exit"); }, 250);
-    });
-
-    btnRecord.classList.add("hidden");
-    btnStop.classList.remove("hidden");
-    recTimer.classList.remove("hidden");
+    btnRecord.classList.add("hidden"); btnStop.classList.remove("hidden"); recTimer.classList.remove("hidden");
     startEpoch = Date.now() + (countdownSec * 1000);
     log("Silent 60fps Recorder started...", "ok");
 
     timerInterval = setInterval(function () {
       if (!activeSession || sess._finalized) return;
       var diff = Math.floor((Date.now() - startEpoch) / 1000);
-      if (diff < 0) {
-        recTimer.textContent = "Starting in " + Math.abs(diff) + "s • Switch to Chrome!";
-      } else {
-        var sec = String(diff % 60).padStart(2, "0");
-        var min = String(Math.floor(diff / 60)).padStart(2, "0");
-        recTimer.textContent = min + ":" + sec + " • GHOST REC 60fps";
-      }
-      if (fs.existsSync(sess.doneSignal)) {
-        finalizeSessionUI(sess, "done-signal");
-      }
+      if (diff < 0) recTimer.textContent = "Starting in " + Math.abs(diff) + "s • Switch to Chrome!";
+      else recTimer.textContent = String(Math.floor(diff / 60)).padStart(2, "0") + ":" + String(diff % 60).padStart(2, "0") + " • GHOST REC 60fps";
+      if (fs.existsSync(sess.doneSignal)) finalizeSessionUI(sess, "done-signal");
     }, 300);
   };
 
   btnStop.onclick = function () {
-    if (!activeSession) {
-      btnStop.classList.add("hidden");
-      btnRecord.classList.remove("hidden");
-      recTimer.classList.add("hidden");
-      return;
-    }
+    if (!activeSession) { btnStop.classList.add("hidden"); btnRecord.classList.remove("hidden"); recTimer.classList.add("hidden"); return; }
     var sess = activeSession;
     recTimer.textContent = "Saving MP4...";
     try { fs.writeFileSync(sess.stopSignal, "STOP", "utf8"); } catch (_e) {}
-
     if (stopWatchdog) clearTimeout(stopWatchdog);
     stopWatchdog = setTimeout(function () {
       if (sess._finalized) return;
@@ -496,6 +565,10 @@
   async function handleCommand(msg) {
     var action = msg.action, args = msg.args || {};
     log("MCP -> " + action, "info");
+    /* Remote Zero-Click Cloud OTA Trigger from Chat! */
+    if (action === "sync_ota_update" || (action === "run_extendscript" && args && String(args.code || "").indexOf("__PIXOPIK_OTA_SYNC__") !== -1)) {
+      return await runOtaUpdate({ force: true, silent: false });
+    }
     if (action === "get_project_info") {
       var info = await evalJSX("get_project_info", {});
       var latest = findLatestRecording();
@@ -519,7 +592,7 @@
     var url = (wsInput.value || "").trim();
     setStatus(false, "Connecting...");
     ws = new WebSocket(url);
-    ws.onopen = function () { setStatus(true, "Turbo v1.5.2"); log("Connected to Cloud MCP Relay!", "ok"); };
+    ws.onopen = function () { setStatus(true, "OTA v1.6"); log("Connected to Cloud MCP Relay!", "ok"); };
     ws.onmessage = async function (ev) {
       var msg;
       try { msg = JSON.parse(ev.data); } catch (_e) { return; }

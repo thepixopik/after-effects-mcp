@@ -1,0 +1,17 @@
+{
+  "version": "1.6.0",
+  "repo": "thepixopik/after-effects-mcp",
+  "branch": "main",
+  "files": [
+    "ota-manifest.json",
+    "index.html",
+    "css/style.css",
+    "js/panel.js",
+    "jsx/host.jsx",
+    "jsx/pro-studio-rig.jsx",
+    "recorder/capture-session.ps1",
+    "recorder/ghost-presenter.ps1",
+    "recorder/studio-browser.ps1",
+    "recorder/install-ffmpeg.ps1"
+  ]
+}
