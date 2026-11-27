@@ -30,20 +30,21 @@
   var REC_ROOT    = path.join(os.homedir(), "Videos", "PixopikRecordings");
   try { fs.mkdirSync(REC_ROOT, { recursive: true }); } catch (_e) {}
 
-  var statusBadge   = document.getElementById("statusBadge");
-  var statusText    = document.getElementById("statusText");
-  var quickBanner   = document.getElementById("quickBanner");
-  var wsInput       = document.getElementById("wsUrl");
-  var logList       = document.getElementById("logList");
-  var btnRecord     = document.getElementById("btnRecord");
-  var btnStop       = document.getElementById("btnStop");
-  var recTimer      = document.getElementById("recTimer");
-  var ffmpegBar     = document.getElementById("ffmpegBar");
-  var modeSelect    = document.getElementById("modeSelect");
-  var wallSelect    = document.getElementById("wallpaperSelect");
-  var frameSelect   = document.getElementById("frameStyleSelect");
-  var chkMicAudio   = document.getElementById("chkMicAudio");
-  var chkMotionBlur = document.getElementById("chkMotionBlur");
+  var statusBadge      = document.getElementById("statusBadge");
+  var statusText       = document.getElementById("statusText");
+  var quickBanner      = document.getElementById("quickBanner");
+  var wsInput          = document.getElementById("wsUrl");
+  var logList          = document.getElementById("logList");
+  var btnRecord        = document.getElementById("btnRecord");
+  var btnStop          = document.getElementById("btnStop");
+  var recTimer         = document.getElementById("recTimer");
+  var ffmpegBar        = document.getElementById("ffmpegBar");
+  var modeSelect       = document.getElementById("modeSelect");
+  var cameraModeSelect = document.getElementById("cameraModeSelect");
+  var wallSelect       = document.getElementById("wallpaperSelect");
+  var frameSelect      = document.getElementById("frameStyleSelect");
+  var chkMicAudio      = document.getElementById("chkMicAudio");
+  var chkMotionBlur    = document.getElementById("chkMotionBlur");
 
   function log(msg, level) {
     var row = document.createElement("div");
@@ -82,8 +83,8 @@
 
   loadExtendScripts(function (res) {
     if (String(res).indexOf("OK") === 0) {
-      quickBanner.textContent = "v1.1.1 Ready • SaaS Promo + YouTube + Space-Safe Stop";
-      log("Studio Pro v1.1.1 engine loaded!", "ok");
+      quickBanner.textContent = "v1.2 Ready • Smooth Travel Glide + YouTube + Live Mic";
+      log("Studio Pro v1.2 engine loaded (Smooth Travel Default!)", "ok");
     } else {
       log("Engine init: " + res, "err");
     }
@@ -97,11 +98,11 @@
       if (isYT) {
         wallSelect.value = "dark_carbon";
         frameSelect.value = "minimal_rounded";
-        log("YouTube Tutorial Mode ON (95% Big Screen • Flat 145% Zoom • Mic ON)", "ok");
+        log("YouTube Tutorial Mode ON (95% Big Screen • Smooth Travel • Mic ON)", "ok");
       } else {
         wallSelect.value = "cosmic_indigo";
         frameSelect.value = "macos_glass";
-        log("SaaS Promo Mode ON (84% Frame • 3D + 178% Zoom)", "ok");
+        log("SaaS Promo Mode ON (84% Frame • Smooth Travel + 3D)", "ok");
       }
     };
   }
@@ -185,6 +186,7 @@
     var isYT = (modeSelect.value === "youtube_tutorial");
     return {
       editMode: modeSelect.value,
+      cameraMode: cameraModeSelect ? cameraModeSelect.value : "smooth_travel",
       aspectPreset: document.getElementById("aspectSelect").value,
       wallpaper: wallSelect.value,
       frameStyle: frameSelect.value,
@@ -208,10 +210,10 @@
       } catch (e) { log("Motion telemetry warning: " + e.message, "err"); }
     }
     var payload = Object.assign({ videoPath: bundle.videoPath.replace(/\\/g, "/"), motion: motion }, currentStudioPrefs(), overrides || {});
-    log("Building " + (payload.editMode === "youtube_tutorial" ? "YouTube Tutorial" : "SaaS Promo") + " timeline...", "info");
+    log("Building " + (payload.cameraMode === "smooth_travel" ? "Smooth Travel" : "Click Zoom") + " timeline...", "info");
     var res = await evalJSX("import_and_autorig_recording", payload);
     if (res && res.ok) {
-      log("Rigged: " + res.compName + " (" + (res.autoZoomClusters || 0) + " zooms)", "ok");
+      log("Rigged: " + res.compName + " (" + (res.cameraMode || "smooth_travel") + ")", "ok");
     } else {
       log("Auto-rig error: " + JSON.stringify(res), "err");
     }
@@ -337,6 +339,10 @@
     });
   };
 
+  document.getElementById("btnSmoothTravel").onclick = async function () {
+    var r = await evalJSX("apply_smooth_travel", {});
+    log(r && r.ok ? "Converted active comp to Smooth Travel Glide (" + r.travelWaypoints + " glides)!" : JSON.stringify(r), r && r.ok ? "ok" : "err");
+  };
   document.getElementById("btnSubscribe").onclick = async function () {
     var r = await evalJSX("add_youtube_subscribe", {});
     log(r && r.ok ? "Added YouTube Subscribe Pill at playhead!" : JSON.stringify(r), r && r.ok ? "ok" : "err");
@@ -347,7 +353,6 @@
     var r = await evalJSX("add_youtube_chapter", { title: title });
     log(r && r.ok ? "Added YouTube Chapter Lower-Third!" : JSON.stringify(r), r && r.ok ? "ok" : "err");
   };
-  document.getElementById("btnAddZoom").onclick = function () { evalJSX("add_smart_zoom_segment", { startTime: 1, holdDuration: 1.5, targetX: 960, targetY: 540, zoomPercent: 160 }); };
   document.getElementById("btnSpotlight").onclick = function () { evalJSX("add_spotlight_focus", { startTime: 1, duration: 2.5, centerX: 960, centerY: 540, radiusX: 280, radiusY: 160, dimOpacity: 68 }); };
   document.getElementById("btnBlur").onclick = function () { evalJSX("add_blur_redact_zone", { startTime: 0, duration: 5, x: 960, y: 220, width: 420, height: 90, blurriness: 45 }); };
   document.getElementById("btnCallout").onclick = function () { evalJSX("add_saas_callout", { text: "Ctrl + K  •  Quick Action", startTime: 1, duration: 2.8, x: 960, y: 150, accentHex: "#6366F1" }); };
@@ -387,7 +392,7 @@
     var url = (wsInput.value || "").trim();
     setStatus(false, "Connecting...");
     ws = new WebSocket(url);
-    ws.onopen = function () { setStatus(true, "Pro v1.1.1 Live"); log("Connected to Cloud MCP Relay!", "ok"); };
+    ws.onopen = function () { setStatus(true, "Pro v1.2 Live"); log("Connected to Cloud MCP Relay!", "ok"); };
     ws.onmessage = async function (ev) {
       var msg;
       try { msg = JSON.parse(ev.data); } catch (_e) { return; }

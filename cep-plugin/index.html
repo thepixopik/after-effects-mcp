@@ -12,7 +12,7 @@
         <span class="badge-logo">PX</span>
         <div>
           <div class="title">Pixopik Motion Studio <span class="pro-pill">PRO</span></div>
-          <div class="subtitle">SaaS &amp; YouTube Studio • v1.1</div>
+          <div class="subtitle">SaaS &amp; YouTube Studio • v1.2</div>
         </div>
       </div>
       <div id="statusBadge" class="status disconnected">
@@ -21,7 +21,7 @@
       </div>
     </header>
 
-    <div id="quickBanner" class="quick-banner">v1.1 Ready • SaaS Promo + YouTube Tutorial + Live Mic</div>
+    <div id="quickBanner" class="quick-banner">v1.2 Ready • Smooth Travel Glide + YouTube + Live Mic</div>
 
     <section class="card">
       <div class="card-title">1. Studio Screen + Mic Recorder (60 FPS)</div>
@@ -29,8 +29,16 @@
       <div class="field-col">
         <label>Editing Style Preset</label>
         <select id="modeSelect">
-          <option value="saas_promo">🚀 SaaS Promo (84% Frame • 3D + 178% Zoom)</option>
-          <option value="youtube_tutorial">🎓 YouTube Tutorial (95% Big Screen • Flat 145% Zoom)</option>
+          <option value="saas_promo">🚀 SaaS Promo (84% Frame • 3D Showcase)</option>
+          <option value="youtube_tutorial">🎓 YouTube Tutorial (95% Big Screen • Flat Clean)</option>
+        </select>
+      </div>
+
+      <div class="field-col">
+        <label>Camera Motion Style</label>
+        <select id="cameraModeSelect">
+          <option value="smooth_travel">🌊 Smooth Travel Glide (No Sudden Zoom)</option>
+          <option value="click_bounce">🎯 Classic Zoom In / Out on Clicks</option>
         </select>
       </div>
 
@@ -76,7 +84,7 @@
 
       <div class="toggles">
         <label><input type="checkbox" id="chkMicAudio" /> 🎙️ Live Mic Voiceover</label>
-        <label><input type="checkbox" id="chkAutoZoom" checked /> Smart Click-Zoom</label>
+        <label><input type="checkbox" id="chkAutoZoom" checked /> Smart Camera Motion</label>
         <label><input type="checkbox" id="chkVectorCursor" checked /> Crisp Vector Cursor</label>
         <label><input type="checkbox" id="chkRipples" checked /> Click Ripples</label>
         <label><input type="checkbox" id="chkMotionBlur" checked /> Motion Blur</label>
@@ -100,11 +108,11 @@
     </section>
 
     <section class="card">
-      <div class="card-title">2. One-Click YouTube &amp; SaaS Graphics</div>
+      <div class="card-title">2. One-Click Camera &amp; Creator Actions</div>
       <div class="grid-btns">
+        <button id="btnSmoothTravel" class="btn btn-chip accent-chip">🌊 Apply Smooth Travel</button>
         <button id="btnSubscribe" class="btn btn-chip accent-chip">🔔 + YT Subscribe Pill</button>
-        <button id="btnChapter" class="btn btn-chip accent-chip">📑 + YT Chapter Card</button>
-        <button id="btnAddZoom" class="btn btn-chip">🔍 + Smart Zoom</button>
+        <button id="btnChapter" class="btn btn-chip">📑 + YT Chapter Card</button>
         <button id="btnSpotlight" class="btn btn-chip">💡 + Spotlight</button>
         <button id="btnBlur" class="btn btn-chip">🔒 + Privacy Blur</button>
         <button id="btnCallout" class="btn btn-chip">⌨️ + Shortcut Badge</button>
