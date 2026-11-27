@@ -5,6 +5,8 @@ param(
 $ErrorActionPreference = "SilentlyContinue"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
 
 try {
   Add-Type -TypeDefinition @"
@@ -13,17 +15,19 @@ using System.Text;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
-public static class PxBrowserWin {
+public static class PxRealChrome {
   public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
-  [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
-  [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
-  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+  [DllImport("user32.dll")] public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+  [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+  [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
 
   public static List<IntPtr> GetChromeWindows() {
     var list = new List<IntPtr>();
@@ -39,12 +43,6 @@ public static class PxBrowserWin {
       return true;
     }, IntPtr.Zero);
     return list;
-  }
-
-  public static string GetTitle(IntPtr hWnd) {
-    var tb = new StringBuilder(256);
-    GetWindowText(hWnd, tb, tb.Capacity);
-    return tb.ToString();
   }
 }
 "@ -ErrorAction SilentlyContinue
@@ -64,324 +62,182 @@ function Find-ChromeExe {
 $chromeExe = Find-ChromeExe
 if (-not $chromeExe) { exit 1 }
 
-function Normalize-InputUrl([string]$raw) {
-  $s = ($raw + "").Trim()
-  if (-not $s) { return "https://www.google.com" }
-  if ($s -match "^https?://") { return $s }
-  if ($s -notmatch "\s" -and $s -match "\.") { return "https://$s" }
-  return "https://www.google.com/search?q=$([uri]::EscapeDataString($s))"
+if ($StartUrl -notmatch "^https?://") { $StartUrl = "https://$StartUrl" }
+
+# 1. Capture existing Chrome windows, then launch 100% REAL Google Chrome (--new-window)
+$before = New-Object "System.Collections.Generic.HashSet[IntPtr]"
+foreach ($h in [PxRealChrome]::GetChromeWindows()) { [void]$before.Add($h) }
+
+Start-Process -FilePath $chromeExe -ArgumentList "--new-window `"$StartUrl`"" | Out-Null
+
+$targetHwnd = [IntPtr]::Zero
+$deadline = [DateTime]::UtcNow.AddSeconds(6)
+while ([DateTime]::UtcNow -lt $deadline) {
+  Start-Sleep -Milliseconds 70
+  foreach ($h in [PxRealChrome]::GetChromeWindows()) {
+    if (-not $before.Contains($h)) {
+      $targetHwnd = $h
+      break
+    }
+  }
+  if ($targetHwnd -ne [IntPtr]::Zero) { break }
 }
 
-$work = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-$wx = $work.X; $wy = $work.Y; $ww = $work.Width; $wh = $work.Height
-$headerH = 80
+if ($targetHwnd -eq [IntPtr]::Zero) { exit 0 }
 
-$script:tabs = New-Object System.Collections.Generic.List[object]
-$script:activeIdx = -1
+# Maximize Real Chrome cleanly
+[void][PxRealChrome]::ShowWindow($targetHwnd, 3)
+[void][PxRealChrome]::SetForegroundWindow($targetHwnd)
+Start-Sleep -Milliseconds 450
 
-function Snap-ChromeAppWindow([IntPtr]$hwnd) {
-  if ($hwnd -eq [IntPtr]::Zero) { return }
-  # Tuck Chrome's 32px native titlebar right behind our 80px custom Studio Tab+URL header!
-  [void][PxBrowserWin]::ShowWindow($hwnd, 9)
-  [void][PxBrowserWin]::SetWindowPos($hwnd, [IntPtr]::Zero, ($wx - 7), ($wy + $headerH - 32), ($ww + 14), ($wh - $headerH + 39), 0x0040)
-}
+# Shallow UIA Finder (skips webpage Document so it runs in < 2ms with zero lag!)
+function Get-ChromeToolbarGeometry([IntPtr]$hwnd) {
+  try {
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+    if (-not $root) { return $null }
+    $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
 
-function Launch-AppHwnd([string]$url) {
-  $before = New-Object "System.Collections.Generic.HashSet[IntPtr]"
-  foreach ($h in [PxBrowserWin]::GetChromeWindows()) { [void]$before.Add($h) }
+    $queue = New-Object System.Collections.Queue
+    $queue.Enqueue(@{ el = $root; depth = 0 })
 
-  Start-Process -FilePath $chromeExe -ArgumentList "--app=`"$url`"" | Out-Null
+    $navToolbarRect = [System.Windows.Rect]::Empty
+    $omniboxRect    = [System.Windows.Rect]::Empty
+    $hasBookmarksBar = $false
 
-  $deadline = [DateTime]::UtcNow.AddSeconds(5)
-  while ([DateTime]::UtcNow -lt $deadline) {
-    [System.Windows.Forms.Application]::DoEvents()
-    Start-Sleep -Milliseconds 60
-    foreach ($h in [PxBrowserWin]::GetChromeWindows()) {
-      if (-not $before.Contains($h)) {
-        Snap-ChromeAppWindow $h
-        return $h
+    while ($queue.Count -gt 0) {
+      $item = $queue.Dequeue()
+      $el = $item.el
+      $d  = $item.depth
+      if ($d -gt 6) { continue }
+
+      $ct = $el.Current.ControlType
+      if ($ct -eq [System.Windows.Automation.ControlType]::Document) { continue }
+
+      if ($ct -eq [System.Windows.Automation.ControlType]::ToolBar) {
+        $nm = $el.Current.Name
+        $rc = $el.Current.BoundingRectangle
+        if ($nm -match "Bookmark|Saved") {
+          if ($rc.Height -gt 14) { $hasBookmarksBar = $true }
+        } elseif ($navToolbarRect.IsEmpty -and $rc.Width -gt 300 -and $rc.Height -ge 28 -and $rc.Height -le 64) {
+          $navToolbarRect = $rc
+        }
+      }
+      elseif ($ct -eq [System.Windows.Automation.ControlType]::Edit) {
+        $rcE = $el.Current.BoundingRectangle
+        if ($omniboxRect.IsEmpty -and $rcE.Width -gt 140 -and $rcE.Height -ge 20 -and $rcE.Height -le 52) {
+          $omniboxRect = $rcE
+        }
+      }
+
+      if ($d -lt 6) {
+        $child = $walker.GetFirstChild($el)
+        while ($child -ne $null) {
+          $queue.Enqueue(@{ el = $child; depth = ($d + 1) })
+          $child = $walker.GetNextSibling($child)
+        }
       }
     }
+
+    return @{
+      toolbarRect  = $navToolbarRect
+      omniboxRect  = $omniboxRect
+      bookmarksOn  = $hasBookmarksBar
+    }
+  } catch {
+    return $null
   }
-  return [IntPtr]::Zero
 }
 
-# Build Sleek Studio Browser Header (Tab Strip + Clean URL Bar)
-$header = New-Object System.Windows.Forms.Form
-$header.Text = "Pixopik Clean Browser"
-$header.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
-$header.StartPosition   = [System.Windows.Forms.FormStartPosition]::Manual
-$header.Bounds          = [System.Drawing.Rectangle]::new($wx, $wy, $ww, $headerH)
-$header.TopMost         = $true
-$header.ShowInTaskbar   = $true
-$header.BackColor       = [System.Drawing.Color]::FromArgb(17, 24, 39)
+# Auto-hide Saved Bookmarks Bar if currently visible in Real Chrome
+$initGeo = Get-ChromeToolbarGeometry $targetHwnd
+if ($initGeo -and $initGeo.bookmarksOn) {
+  [void][PxRealChrome]::SetForegroundWindow($targetHwnd)
+  Start-Sleep -Milliseconds 60
+  [System.Windows.Forms.SendKeys]::SendWait("^+b")
+}
 
-# Row 1: Tab Bar Panel (0..38px)
-$tabStrip = New-Object System.Windows.Forms.Panel
-$tabStrip.Left = 0; $tabStrip.Top = 0; $tabStrip.Width = $ww; $tabStrip.Height = 38
-$tabStrip.BackColor = [System.Drawing.Color]::FromArgb(11, 15, 25)
-$header.Controls.Add($tabStrip)
-
-# macOS Window Dots (Left)
-$dotPanel = New-Object System.Windows.Forms.Panel
-$dotPanel.Left = 12; $dotPanel.Top = 0; $dotPanel.Width = 66; $dotPanel.Height = 38
-$dotPanel.Add_Paint({
-  param($s, $e)
-  $e.Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-  $cols = @(
-    [System.Drawing.Color]::FromArgb(255, 95, 86),
-    [System.Drawing.Color]::FromArgb(255, 189, 46),
-    [System.Drawing.Color]::FromArgb(39, 201, 63)
-  )
-  for ($i = 0; $i -lt 3; $i++) {
-    $br = New-Object System.Drawing.SolidBrush($cols[$i])
-    $e.Graphics.FillEllipse($br, ($i * 20) + 4, 13, 12, 12)
-    $br.Dispose()
+function Sample-ScreenColor([int]$x, [int]$y) {
+  try {
+    $bmp = New-Object System.Drawing.Bitmap(1, 1)
+    $g   = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.CopyFromScreen($x, $y, 0, 0, [System.Drawing.Size]::new(1, 1))
+    $col = $bmp.GetPixel(0, 0)
+    $g.Dispose(); $bmp.Dispose()
+    return $col
+  } catch {
+    return [System.Drawing.Color]::FromArgb(32, 33, 36)
   }
+}
+
+# Seamless Click-Through Patch ONLY over Chrome's Extension Icons Strip!
+$extMask = New-Object System.Windows.Forms.Form
+$extMask.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+$extMask.StartPosition   = [System.Windows.Forms.FormStartPosition]::Manual
+$extMask.ShowInTaskbar   = $false
+$extMask.TopMost         = $true
+$extMask.Width           = 10
+$extMask.Height          = 10
+$extMask.Left            = -2000
+$extMask.Top             = -2000
+$extMask.BackColor       = [System.Drawing.Color]::FromArgb(32, 33, 36)
+
+$extMask.Add_Shown({
+  try {
+    $ex = [PxRealChrome]::GetWindowLong($extMask.Handle, -20)
+    # WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
+    [void][PxRealChrome]::SetWindowLong($extMask.Handle, -20, ($ex -bor 0x80000 -bor 0x20 -bor 0x08000000))
+  } catch {}
 })
-$tabStrip.Controls.Add($dotPanel)
+$extMask.Show()
 
-$tabsHost = New-Object System.Windows.Forms.Panel
-$tabsHost.Left = 82; $tabsHost.Top = 4; $tabsHost.Width = ($ww - 134); $tabsHost.Height = 34
-$tabsHost.BackColor = [System.Drawing.Color]::Transparent
-$tabStrip.Controls.Add($tabsHost)
-
-# Close Browser Button (Far Top-Right)
-$btnQuit = New-Object System.Windows.Forms.Button
-$btnQuit.Text = "X"
-$btnQuit.Left = ($ww - 44); $btnQuit.Top = 4; $btnQuit.Width = 36; $btnQuit.Height = 28
-$btnQuit.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$btnQuit.FlatAppearance.BorderSize = 0
-$btnQuit.BackColor = [System.Drawing.Color]::FromArgb(30, 41, 59)
-$btnQuit.ForeColor = [System.Drawing.Color]::FromArgb(203, 213, 225)
-$btnQuit.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Bold)
-$btnQuit.Add_Click({
-  foreach ($t in $script:tabs) {
-    if ($t.hwnd -ne [IntPtr]::Zero -and [PxBrowserWin]::IsWindow($t.hwnd)) {
-      [void][PxBrowserWin]::PostMessage($t.hwnd, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
-    }
-  }
-  $header.Close()
-})
-$tabStrip.Controls.Add($btnQuit)
-
-# Row 2: Clean Navigation & URL Bar (38..80px)
-$navRow = New-Object System.Windows.Forms.Panel
-$navRow.Left = 0; $navRow.Top = 38; $navRow.Width = $ww; $navRow.Height = 42
-$navRow.BackColor = [System.Drawing.Color]::FromArgb(20, 27, 45)
-$header.Controls.Add($navRow)
-
-function New-NavBtn([string]$txt, [int]$x) {
-  $b = New-Object System.Windows.Forms.Button
-  $b.Text = $txt; $b.Left = $x; $b.Top = 6; $b.Width = 32; $b.Height = 30
-  $b.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-  $b.FlatAppearance.BorderSize = 0
-  $b.BackColor = [System.Drawing.Color]::FromArgb(30, 41, 59)
-  $b.ForeColor = [System.Drawing.Color]::FromArgb(226, 232, 240)
-  $b.Font = New-Object System.Drawing.Font("Segoe UI Symbol", 9.5, [System.Drawing.FontStyle]::Bold)
-  $b.Cursor = [System.Windows.Forms.Cursors]::Hand
-  $navRow.Controls.Add($b)
-  return $b
-}
-
-$btnBack   = New-NavBtn "<" 12
-$btnFwd    = New-NavBtn ">" 48
-$btnReload = New-NavBtn "R" 84
-
-# Pill URL Container
-$urlWrap = New-Object System.Windows.Forms.Panel
-$urlWrap.Left = 128; $urlWrap.Top = 6; $urlWrap.Width = ($ww - 216); $urlWrap.Height = 30
-$urlWrap.BackColor = [System.Drawing.Color]::FromArgb(11, 15, 25)
-$navRow.Controls.Add($urlWrap)
-
-$lockLbl = New-Object System.Windows.Forms.Label
-$lockLbl.Text = "HTTPS"
-$lockLbl.Left = 8; $lockLbl.Top = 0; $lockLbl.Width = 44; $lockLbl.Height = 30
-$lockLbl.ForeColor = [System.Drawing.Color]::FromArgb(52, 211, 153)
-$lockLbl.Font = New-Object System.Drawing.Font("Segoe UI", 7.8, [System.Drawing.FontStyle]::Bold)
-$lockLbl.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
-$urlWrap.Controls.Add($lockLbl)
-
-$urlBox = New-Object System.Windows.Forms.TextBox
-$urlBox.BorderStyle = [System.Windows.Forms.BorderStyle]::None
-$urlBox.BackColor   = [System.Drawing.Color]::FromArgb(11, 15, 25)
-$urlBox.ForeColor   = [System.Drawing.Color]::FromArgb(241, 245, 249)
-$urlBox.Font        = New-Object System.Drawing.Font("Segoe UI", 10.0)
-$urlBox.Left = 56; $urlBox.Top = 6; $urlBox.Width = ($urlWrap.Width - 68)
-$urlWrap.Controls.Add($urlBox)
-
-$btnGo = New-Object System.Windows.Forms.Button
-$btnGo.Text = "Go"
-$btnGo.Left = ($ww - 80); $btnGo.Top = 6; $btnGo.Width = 64; $btnGo.Height = 30
-$btnGo.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$btnGo.FlatAppearance.BorderSize = 0
-$btnGo.BackColor = [System.Drawing.Color]::FromArgb(79, 70, 229)
-$btnGo.ForeColor = [System.Drawing.Color]::White
-$btnGo.Font = New-Object System.Drawing.Font("Segoe UI", 8.8, [System.Drawing.FontStyle]::Bold)
-$btnGo.Cursor = [System.Windows.Forms.Cursors]::Hand
-$navRow.Controls.Add($btnGo)
-
-function Send-KeyToActive([string]$keys) {
-  if ($script:activeIdx -lt 0 -or $script:activeIdx -ge $script:tabs.Count) { return }
-  $h = $script:tabs[$script:activeIdx].hwnd
-  if ($h -ne [IntPtr]::Zero -and [PxBrowserWin]::IsWindow($h)) {
-    [void][PxBrowserWin]::SetForegroundWindow($h)
-    Start-Sleep -Milliseconds 40
-    [System.Windows.Forms.SendKeys]::SendWait($keys)
-  }
-}
-
-$btnBack.Add_Click({ Send-KeyToActive "%{LEFT}" })
-$btnFwd.Add_Click({ Send-KeyToActive "%{RIGHT}" })
-$btnReload.Add_Click({ Send-KeyToActive "{F5}" })
-
-function Render-TabStrip {
-  $tabsHost.Controls.Clear()
-  $x = 0
-  for ($i = 0; $i -lt $script:tabs.Count; $i++) {
-    $t = $script:tabs[$i]
-    $isAct = ($i -eq $script:activeIdx)
-    $tabPnl = New-Object System.Windows.Forms.Panel
-    $tabPnl.Left = $x; $tabPnl.Top = 2; $tabPnl.Width = 204; $tabPnl.Height = 32
-    $tabPnl.BackColor = if ($isAct) { [System.Drawing.Color]::FromArgb(20, 27, 45) } else { [System.Drawing.Color]::FromArgb(15, 20, 34) }
-    $tabPnl.Tag = $i
-
-    $tLbl = New-Object System.Windows.Forms.Label
-    $shortT = if ($t.title.Length -gt 22) { $t.title.Substring(0, 21) + "..." } else { $t.title }
-    $tLbl.Text = $shortT
-    $tLbl.Left = 10; $tLbl.Top = 0; $tLbl.Width = 162; $tLbl.Height = 32
-    $tLbl.ForeColor = if ($isAct) { [System.Drawing.Color]::White } else { [System.Drawing.Color]::FromArgb(148, 163, 184) }
-    $tLbl.Font = New-Object System.Drawing.Font("Segoe UI", 8.8, $(if ($isAct) { [System.Drawing.FontStyle]::Bold } else { [System.Drawing.FontStyle]::Regular }))
-    $tLbl.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
-    $tLbl.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $tLbl.Tag = $i
-    $tLbl.Add_Click({ param($s, $e) Switch-ToTab ([int]$s.Tag) })
-    $tabPnl.Controls.Add($tLbl)
-
-    $xBtn = New-Object System.Windows.Forms.Label
-    $xBtn.Text = "x"
-    $xBtn.Left = 176; $xBtn.Top = 6; $xBtn.Width = 22; $xBtn.Height = 20
-    $xBtn.ForeColor = [System.Drawing.Color]::FromArgb(148, 163, 184)
-    $xBtn.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Bold)
-    $xBtn.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
-    $xBtn.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $xBtn.Tag = $i
-    $xBtn.Add_Click({ param($s, $e) Close-TabAt ([int]$s.Tag) })
-    $tabPnl.Controls.Add($xBtn)
-
-    $tabsHost.Controls.Add($tabPnl)
-    $x += 208
-  }
-
-  $plusBtn = New-Object System.Windows.Forms.Button
-  $plusBtn.Text = "+"
-  $plusBtn.Left = $x + 4; $plusBtn.Top = 3; $plusBtn.Width = 32; $plusBtn.Height = 28
-  $plusBtn.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-  $plusBtn.FlatAppearance.BorderSize = 0
-  $plusBtn.BackColor = [System.Drawing.Color]::FromArgb(30, 41, 59)
-  $plusBtn.ForeColor = [System.Drawing.Color]::White
-  $plusBtn.Font = New-Object System.Drawing.Font("Segoe UI", 11.0, [System.Drawing.FontStyle]::Bold)
-  $plusBtn.Cursor = [System.Windows.Forms.Cursors]::Hand
-  $plusBtn.Add_Click({ Open-NewTab "https://www.google.com" })
-  $tabsHost.Controls.Add($plusBtn)
-}
-
-function Switch-ToTab([int]$idx) {
-  if ($idx -lt 0 -or $idx -ge $script:tabs.Count) { return }
-  $script:activeIdx = $idx
-  for ($i = 0; $i -lt $script:tabs.Count; $i++) {
-    $h = $script:tabs[$i].hwnd
-    if ($h -ne [IntPtr]::Zero -and [PxBrowserWin]::IsWindow($h)) {
-      if ($i -eq $idx) {
-        Snap-ChromeAppWindow $h
-        [void][PxBrowserWin]::SetForegroundWindow($h)
-      } else {
-        [void][PxBrowserWin]::ShowWindow($h, 6) # Minimize inactive tab cleanly
-      }
-    }
-  }
-  $urlBox.Text = $script:tabs[$idx].url
-  Render-TabStrip
-}
-
-function Open-NewTab([string]$rawUrl) {
-  $u = Normalize-InputUrl $rawUrl
-  foreach ($existing in $script:tabs) {
-    if ($existing.hwnd -ne [IntPtr]::Zero -and [PxBrowserWin]::IsWindow($existing.hwnd)) {
-      [void][PxBrowserWin]::ShowWindow($existing.hwnd, 6)
-    }
-  }
-  $h = Launch-AppHwnd $u
-  $title = if ($h -ne [IntPtr]::Zero) { [PxBrowserWin]::GetTitle($h) } else { $u }
-  if (-not $title) { $title = $u }
-  $script:tabs.Add(@{ url = $u; title = $title; hwnd = $h })
-  $script:activeIdx = $script:tabs.Count - 1
-  $urlBox.Text = $u
-  Render-TabStrip
-}
-
-function Navigate-ActiveTab([string]$rawUrl) {
-  $u = Normalize-InputUrl $rawUrl
-  if ($script:activeIdx -lt 0 -or $script:activeIdx -ge $script:tabs.Count) {
-    Open-NewTab $u
+$script:tickCount = 0
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 110
+$timer.Add_Tick({
+  # Exit automatically as soon as the user closes that Real Chrome window!
+  if (-not [PxRealChrome]::IsWindow($targetHwnd)) {
+    $timer.Stop()
+    $extMask.Close()
+    [System.Windows.Forms.Application]::Exit()
     return
   }
-  $oldH = $script:tabs[$script:activeIdx].hwnd
-  $newH = Launch-AppHwnd $u
-  if ($oldH -ne [IntPtr]::Zero -and [PxBrowserWin]::IsWindow($oldH)) {
-    [void][PxBrowserWin]::PostMessage($oldH, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
-  }
-  $script:tabs[$script:activeIdx].url = $u
-  $script:tabs[$script:activeIdx].hwnd = $newH
-  $t = if ($newH -ne [IntPtr]::Zero) { [PxBrowserWin]::GetTitle($newH) } else { $u }
-  if ($t) { $script:tabs[$script:activeIdx].title = $t }
-  $urlBox.Text = $u
-  Render-TabStrip
-}
 
-function Close-TabAt([int]$idx) {
-  if ($idx -lt 0 -or $idx -ge $script:tabs.Count) { return }
-  $h = $script:tabs[$idx].hwnd
-  if ($h -ne [IntPtr]::Zero -and [PxBrowserWin]::IsWindow($h)) {
-    [void][PxBrowserWin]::PostMessage($h, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
-  }
-  $script:tabs.RemoveAt($idx)
-  if ($script:tabs.Count -eq 0) {
-    $header.Close()
+  $fg = [PxRealChrome]::GetForegroundWindow()
+  if ([PxRealChrome]::IsIconic($targetHwnd) -or $fg -ne $targetHwnd) {
+    if ($extMask.Visible) { $extMask.Hide() }
     return
   }
-  if ($script:activeIdx -ge $script:tabs.Count) { $script:activeIdx = $script:tabs.Count - 1 }
-  Switch-ToTab $script:activeIdx
-}
 
-$btnGo.Add_Click({ Navigate-ActiveTab $urlBox.Text })
-$urlBox.Add_KeyDown({
-  param($s, $e)
-  if ($e.KeyCode -eq [System.Windows.Forms.Keys]::Enter) {
-    $e.SuppressKeyPress = $true
-    Navigate-ActiveTab $urlBox.Text
+  $geo = Get-ChromeToolbarGeometry $targetHwnd
+  if (-not $geo -or $geo.toolbarRect.IsEmpty -or $geo.omniboxRect.IsEmpty) {
+    if ($extMask.Visible) { $extMask.Hide() }
+    return
   }
-})
 
-# Live Sync Timer: updates tab titles automatically as you browse inside Chrome!
-$syncTimer = New-Object System.Windows.Forms.Timer
-$syncTimer.Interval = 600
-$syncTimer.Add_Tick({
-  if ($script:activeIdx -ge 0 -and $script:activeIdx -lt $script:tabs.Count) {
-    $cur = $script:tabs[$script:activeIdx]
-    if ($cur.hwnd -ne [IntPtr]::Zero -and [PxBrowserWin]::IsWindow($cur.hwnd)) {
-      $liveTitle = [PxBrowserWin]::GetTitle($cur.hwnd)
-      if ($liveTitle -and $liveTitle -ne $cur.title) {
-        $cur.title = $liveTitle
-        Render-TabStrip
-      }
-    }
+  $tb = $geo.toolbarRect
+  $om = $geo.omniboxRect
+
+  # Cover ONLY the extension icons + puzzle strip to the right of the real URL omnibox (leave 3-dot menu intact!)
+  $mx = [int][Math]::Round($om.Right + 6)
+  $my = [int][Math]::Round($tb.Top + 2)
+  $mw = [int][Math]::Round(($tb.Right - 38) - $mx)
+  $mh = [int][Math]::Round($tb.Height - 4)
+
+  if ($mw -le 12 -or $mh -le 12) {
+    if ($extMask.Visible) { $extMask.Hide() }
+    return
   }
-})
-$syncTimer.Start()
 
-$header.Add_Shown({
-  Open-NewTab $StartUrl
-})
+  if (($script:tickCount % 5) -eq 0) {
+    $sx = [int][Math]::Round($tb.Left + 3)
+    $sy = [int][Math]::Round($tb.Top + 4)
+    $extMask.BackColor = Sample-ScreenColor $sx $sy
+  }
+  $script:tickCount++
 
-[System.Windows.Forms.Application]::Run($header)
+  $extMask.SetBounds($mx, $my, $mw, $mh)
+  if (-not $extMask.Visible) { $extMask.Show() }
+})
+$timer.Start()
+
+[System.Windows.Forms.Application]::Run()
