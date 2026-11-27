@@ -20,6 +20,17 @@ foreach ($f in @($rawVideo, $micWav, $videoOut, $script:stopSignal, $doneSignal)
   if (Test-Path -LiteralPath $f) { Remove-Item -LiteralPath $f -Force }
 }
 
+try {
+  Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class PxRecGhost {
+  [DllImport("user32.dll")]
+  public static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
+}
+"@ -ErrorAction SilentlyContinue
+} catch {}
+
 function Find-Ffmpeg {
   $cmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
   if ($cmd) { return $cmd.Source }
@@ -70,7 +81,7 @@ $bounds  = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $screenW = $bounds.Width
 $screenH = $bounds.Height
 
-# Floating Top-Right Stop Pill
+# Floating Top-Right Ghost Stop Pill (100% Invisible in Recorded MP4!)
 $pill = New-Object System.Windows.Forms.Form
 $pill.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $pill.TopMost = $true
@@ -78,8 +89,8 @@ $pill.ShowInTaskbar = $false
 $pill.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
 $pill.Width = 290
 $pill.Height = 42
-$pill.Left = [Math]::Max(20, $screenW - 310)
-$pill.Top = 18
+$pill.Left = [Math]::Max(20, $screenW - 304)
+$pill.Top = 10
 $pill.BackColor = [System.Drawing.Color]::FromArgb(15, 23, 42)
 $pill.Opacity = 0.95
 
@@ -111,6 +122,7 @@ $stopBtn.Add_Click({
 })
 $pill.Controls.Add($stopBtn)
 $pill.Show()
+try { [void][PxRecGhost]::SetWindowDisplayAffinity($pill.Handle, 0x00000011) } catch {}
 
 if ($Countdown -gt 0) {
   $endWait = [DateTime]::UtcNow.AddSeconds($Countdown)
@@ -139,7 +151,6 @@ function Start-Proc([string]$exe, [string]$arguments) {
   return $proc
 }
 
-# Pure libx264 ultrafast works on 100% of Intel/AMD/NVIDIA PCs (eliminates fake h264_nvenc crashes!)
 function Start-VideoCapture([bool]$useDda) {
   $vIn = if ($useDda) {
     "-f lavfi -i `"ddagrab=framerate=$Fps`:draw_mouse=0,hwdownload,format=bgra`""
@@ -184,7 +195,6 @@ while ($true) {
   if ($script:stopReq -or (Test-Path -LiteralPath $script:stopSignal)) { break }
 
   if ($vProc.HasExited) {
-    # Self-heal if hybrid-GPU ddagrab exited late!
     if ($usedDda -and -not $retriedGdi -and $sw.Elapsed.TotalSeconds -lt 3.0) {
       $usedDda = $false
       $retriedGdi = $true
@@ -201,7 +211,7 @@ while ($true) {
   $sec = [int][Math]::Floor($t)
   $mm = "{0:D2}" -f [int][Math]::Floor($sec / 60)
   $ss = "{0:D2}" -f ($sec % 60)
-  $lbl.Text = "REC $mm`:$ss • $micTag"
+  $lbl.Text = "GHOST $mm`:$ss • $micTag"
 
   $pos = [System.Windows.Forms.Cursor]::Position
   $btns = [System.Windows.Forms.Control]::MouseButtons
@@ -239,7 +249,6 @@ foreach ($pr in @($vProc, $micProc)) {
 
 try { $pill.Close(); $pill.Dispose() } catch {}
 
-# Instant stream-copy mux of video_raw.mp4 + voiceover.wav -> screen.mp4
 $hasVideo = (Test-Path -LiteralPath $rawVideo) -and ((Get-Item -LiteralPath $rawVideo).Length -gt 1000)
 $hasAudio = (Test-Path -LiteralPath $micWav) -and ((Get-Item -LiteralPath $micWav).Length -gt 2000)
 
@@ -257,7 +266,7 @@ if ($hasVideo -and $hasAudio) {
 }
 
 $payload = @{
-  version      = "1.2.1"
+  version      = "1.3.0"
   fps          = $Fps
   hasMicAudio  = $hasAudio
   screenWidth  = $screenW
