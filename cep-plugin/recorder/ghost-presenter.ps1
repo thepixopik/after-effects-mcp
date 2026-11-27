@@ -29,12 +29,12 @@ function Set-ClickThrough([System.Windows.Forms.Form]$f) {
 }
 
 $bounds  = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$work    = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
 $screenW = $bounds.Width
 $screenH = $bounds.Height
 $keyColor = [System.Drawing.Color]::FromArgb(12, 16, 27)
 
-# State
-$script:activeTool = "cursor" # cursor | spotlight | box | arrow | pen | step | laser | hide
+$script:activeTool = "cursor"
 $script:shapes     = New-Object System.Collections.Generic.List[object]
 $script:stepNum    = 1
 $script:isDrawing  = $false
@@ -42,7 +42,6 @@ $script:ptStart    = [System.Drawing.Point]::Empty
 $script:ptCurr     = [System.Drawing.Point]::Empty
 $script:penPts     = $null
 
-# 1. Spotlight Dim Layer (65% Dark + Click-Through Hole around Cursor, Visible in Recording!)
 $spotForm = New-Object System.Windows.Forms.Form
 $spotForm.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $spotForm.StartPosition   = [System.Windows.Forms.FormStartPosition]::Manual
@@ -52,7 +51,6 @@ $spotForm.ShowInTaskbar   = $false
 $spotForm.BackColor       = [System.Drawing.Color]::FromArgb(8, 12, 24)
 $spotForm.Opacity         = 0.66
 
-# 2. Live Vector Annotation Canvas (Recorded in MP4, 100% Click-Through!)
 $canvas = New-Object System.Windows.Forms.Form
 $canvas.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $canvas.StartPosition   = [System.Windows.Forms.FormStartPosition]::Manual
@@ -61,11 +59,9 @@ $canvas.TopMost         = $true
 $canvas.ShowInTaskbar   = $false
 $canvas.BackColor       = $keyColor
 $canvas.TransparencyKey = $keyColor
-# DoubleBuffered via reflection to eliminate any flicker
 $propDb = $canvas.GetType().GetProperty("DoubleBuffered", [System.Reflection.BindingFlags]"Instance,NonPublic")
 if ($propDb) { $propDb.SetValue($canvas, $true, $null) }
 
-# 3. Invisible Mouse Catcher (ONLY active when drawing Box/Arrow/Pen/Step/Hide; Right-Click returns to Cursor!)
 $catcher = New-Object System.Windows.Forms.Form
 $catcher.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $catcher.StartPosition   = [System.Windows.Forms.FormStartPosition]::Manual
@@ -76,7 +72,7 @@ $catcher.BackColor       = [System.Drawing.Color]::Black
 $catcher.Opacity         = 0.012
 $catcher.Cursor          = [System.Windows.Forms.Cursors]::Cross
 
-# 4. Top-Center GHOST TOOLBAR (Visible to YOU, 100% INVISIBLE in Recorded MP4!)
+# Dock Ghost Bar at Bottom-Center so Top Browser Tabs + URL Bar stay 100% clear!
 $bar = New-Object System.Windows.Forms.Form
 $bar.Text            = "Pixopik Ghost Toolbar"
 $bar.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
@@ -84,16 +80,15 @@ $bar.StartPosition   = [System.Windows.Forms.FormStartPosition]::Manual
 $bar.TopMost         = $true
 $bar.ShowInTaskbar   = $false
 $bar.Height          = 44
-$bar.Top             = 10
+$bar.Top             = [Math]::Max(90, $work.Bottom - 56)
 $bar.BackColor       = [System.Drawing.Color]::FromArgb(13, 18, 30)
 $bar.Opacity         = 0.96
 
 function Update-CatcherSafeRegion {
   $reg = New-Object System.Drawing.Region([System.Drawing.Rectangle]::new(0, 0, $screenW, $screenH))
-  $barPad = [System.Drawing.Rectangle]::Inflate($bar.Bounds, 6, 6)
-  $reg.Exclude($barPad)
-  # Also never block top-right Stop & Rig pill!
-  $reg.Exclude([System.Drawing.Rectangle]::new([Math]::Max(0, $screenW - 320), 0, 320, 62))
+  $reg.Exclude([System.Drawing.Rectangle]::Inflate($bar.Bounds, 6, 6))
+  # Never block Top 82px Studio Browser Tabs/URL Bar or Top-Right Stop Pill!
+  $reg.Exclude([System.Drawing.Rectangle]::new(0, 0, $screenW, 82))
   $catcher.Region = $reg
 }
 
@@ -113,7 +108,6 @@ $canvas.Add_Paint({
   $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
   $now = [DateTime]::UtcNow
 
-  # Spotlight glowing border ring
   if ($script:activeTool -eq "spotlight") {
     $mp = [System.Windows.Forms.Cursor]::Position
     $sr = [System.Drawing.Rectangle]::new($mp.X - 150, $mp.Y - 92, 300, 184)
@@ -124,7 +118,6 @@ $canvas.Add_Paint({
     $penGlow.Dispose(); $gpS.Dispose()
   }
 
-  # Laser glowing dot
   if ($script:activeTool -eq "laser") {
     $mp = [System.Windows.Forms.Cursor]::Position
     $brOuter = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(239, 68, 68))
@@ -134,7 +127,6 @@ $canvas.Add_Paint({
     $brOuter.Dispose(); $brInner.Dispose()
   }
 
-  # Committed shapes
   for ($i = $script:shapes.Count - 1; $i -ge 0; $i--) {
     $sh = $script:shapes[$i]
     if ($sh.type -eq "pen" -and ($now - $sh.created).TotalSeconds -gt 3.8) {
@@ -144,15 +136,8 @@ $canvas.Add_Paint({
     Draw-ShapeItem $g $sh
   }
 
-  # Live in-progress drag preview
   if ($script:isDrawing) {
-    $preview = @{
-      type = $script:activeTool
-      p1   = $script:ptStart
-      p2   = $script:ptCurr
-      pts  = $script:penPts
-    }
-    Draw-ShapeItem $g $preview
+    Draw-ShapeItem $g @{ type = $script:activeTool; p1 = $script:ptStart; p2 = $script:ptCurr; pts = $script:penPts }
   }
 })
 
@@ -176,8 +161,7 @@ function Draw-ShapeItem($g, $sh) {
     Add-RoundedRect $gp $rc 10
     $br = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(17, 24, 39))
     $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(71, 85, 105), 2.0)
-    $g.FillPath($br, $gp)
-    $g.DrawPath($pen, $gp)
+    $g.FillPath($br, $gp); $g.DrawPath($pen, $gp)
     if ($w -gt 70 -and $h -gt 22) {
       $fnt = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Bold)
       $tBr = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(148, 163, 184))
@@ -210,8 +194,7 @@ function Draw-ShapeItem($g, $sh) {
     $rc = [System.Drawing.Rectangle]::new($cx - 17, $cy - 17, 34, 34)
     $br = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(99, 102, 241))
     $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::White, 2.5)
-    $g.FillEllipse($br, $rc)
-    $g.DrawEllipse($pen, $rc)
+    $g.FillEllipse($br, $rc); $g.DrawEllipse($pen, $rc)
     $fnt = New-Object System.Drawing.Font("Segoe UI", 11.5, [System.Drawing.FontStyle]::Bold)
     $tBr = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
     $sf  = New-Object System.Drawing.StringFormat
@@ -225,10 +208,7 @@ function Draw-ShapeItem($g, $sh) {
 $script:toolBtns = @{}
 function Set-PresenterTool([string]$tid) {
   if ($tid -eq "clear") {
-    $script:shapes.Clear()
-    $script:stepNum = 1
-    $canvas.Invalidate()
-    return
+    $script:shapes.Clear(); $script:stepNum = 1; $canvas.Invalidate(); return
   }
   if ($script:activeTool -eq $tid -and $tid -ne "cursor") { $tid = "cursor" }
   $script:activeTool = $tid
@@ -244,20 +224,10 @@ function Set-PresenterTool([string]$tid) {
     }
   }
 
-  if ($tid -eq "spotlight") {
-    $spotForm.Show()
-    Set-ClickThrough $spotForm
-  } else {
-    $spotForm.Hide()
-  }
+  if ($tid -eq "spotlight") { $spotForm.Show(); Set-ClickThrough $spotForm } else { $spotForm.Hide() }
 
   $needsCatcher = $tid -in @("box", "arrow", "pen", "step", "hide")
-  if ($needsCatcher) {
-    Update-CatcherSafeRegion
-    $catcher.Show()
-  } else {
-    $catcher.Hide()
-  }
+  if ($needsCatcher) { Update-CatcherSafeRegion; $catcher.Show() } else { $catcher.Hide() }
 
   $canvas.BringToFront()
   if ($needsCatcher) { $catcher.BringToFront() }
@@ -265,24 +235,16 @@ function Set-PresenterTool([string]$tid) {
   $canvas.Invalidate()
 }
 
-# Mouse handlers on $catcher for instant on-screen drawing
 $catcher.Add_MouseDown({
   param($s, $e)
-  if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Right) {
-    Set-PresenterTool "cursor"
-    return
-  }
+  if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Right) { Set-PresenterTool "cursor"; return }
   if ($e.Button -ne [System.Windows.Forms.MouseButtons]::Left) { return }
   $p = [System.Windows.Forms.Cursor]::Position
   if ($script:activeTool -eq "step") {
     $script:shapes.Add(@{ type = "step"; p1 = $p; num = $script:stepNum; created = [DateTime]::UtcNow })
-    $script:stepNum++
-    $canvas.Invalidate()
-    return
+    $script:stepNum++; $canvas.Invalidate(); return
   }
-  $script:isDrawing = $true
-  $script:ptStart   = $p
-  $script:ptCurr    = $p
+  $script:isDrawing = $true; $script:ptStart = $p; $script:ptCurr = $p
   if ($script:activeTool -eq "pen") {
     $script:penPts = New-Object System.Collections.Generic.List[System.Drawing.Point]
     $script:penPts.Add($p)
@@ -296,9 +258,7 @@ $catcher.Add_MouseMove({
   $script:ptCurr = $p
   if ($script:activeTool -eq "pen" -and $script:penPts) {
     $last = $script:penPts[$script:penPts.Count - 1]
-    if ([Math]::Abs($p.X - $last.X) + [Math]::Abs($p.Y - $last.Y) -ge 3) {
-      $script:penPts.Add($p)
-    }
+    if ([Math]::Abs($p.X - $last.X) + [Math]::Abs($p.Y - $last.Y) -ge 3) { $script:penPts.Add($p) }
   }
   $canvas.Invalidate()
 })
@@ -308,35 +268,24 @@ $catcher.Add_MouseUp({
   if (-not $script:isDrawing) { return }
   $script:isDrawing = $false
   $p = [System.Windows.Forms.Cursor]::Position
-  $script:shapes.Add(@{
-    type    = $script:activeTool
-    p1      = $script:ptStart
-    p2      = $p
-    pts     = $script:penPts
-    created = [DateTime]::UtcNow
-  })
-  $script:penPts = $null
-  $canvas.Invalidate()
+  $script:shapes.Add(@{ type = $script:activeTool; p1 = $script:ptStart; p2 = $p; pts = $script:penPts; created = [DateTime]::UtcNow })
+  $script:penPts = $null; $canvas.Invalidate()
 })
 
-# Build Ghost Bar UI
 $drag = New-Object System.Windows.Forms.Label
-$drag.Text      = "GHOST BAR"
-$drag.ForeColor = [System.Drawing.Color]::FromArgb(129, 140, 248)
-$drag.Font      = New-Object System.Drawing.Font("Segoe UI", 8.0, [System.Drawing.FontStyle]::Bold)
+$drag.Text = "GHOST BAR"; $drag.ForeColor = [System.Drawing.Color]::FromArgb(129, 140, 248)
+$drag.Font = New-Object System.Drawing.Font("Segoe UI", 8.0, [System.Drawing.FontStyle]::Bold)
 $drag.Left = 10; $drag.Top = 0; $drag.Width = 74; $drag.Height = 44
 $drag.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
-$drag.Cursor    = [System.Windows.Forms.Cursors]::SizeAll
+$drag.Cursor = [System.Windows.Forms.Cursors]::SizeAll
 
-$script:draggingBar = $false
-$script:dragOff = [System.Drawing.Point]::Empty
+$script:draggingBar = $false; $script:dragOff = [System.Drawing.Point]::Empty
 $drag.Add_MouseDown({ param($s, $e) $script:draggingBar = $true; $script:dragOff = $e.Location })
 $drag.Add_MouseMove({
   param($s, $e)
   if ($script:draggingBar) {
     $mp = [System.Windows.Forms.Cursor]::Position
-    $bar.Left = $mp.X - $script:dragOff.X - 10
-    $bar.Top  = $mp.Y - $script:dragOff.Y
+    $bar.Left = $mp.X - $script:dragOff.X - 10; $bar.Top = $mp.Y - $script:dragOff.Y
     Update-CatcherSafeRegion
   }
 })
@@ -372,30 +321,20 @@ foreach ($d in $defs) {
 }
 
 $btnClose = New-Object System.Windows.Forms.Button
-$btnClose.Text = "X"
-$btnClose.Left = $cx + 2; $btnClose.Top = 7; $btnClose.Width = 30; $btnClose.Height = 30
-$btnClose.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$btnClose.FlatAppearance.BorderSize = 0
-$btnClose.BackColor = [System.Drawing.Color]::FromArgb(153, 27, 27)
-$btnClose.ForeColor = [System.Drawing.Color]::White
+$btnClose.Text = "X"; $btnClose.Left = $cx + 2; $btnClose.Top = 7; $btnClose.Width = 30; $btnClose.Height = 30
+$btnClose.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat; $btnClose.FlatAppearance.BorderSize = 0
+$btnClose.BackColor = [System.Drawing.Color]::FromArgb(153, 27, 27); $btnClose.ForeColor = [System.Drawing.Color]::White
 $btnClose.Font = New-Object System.Drawing.Font("Segoe UI", 8.2, [System.Drawing.FontStyle]::Bold)
-$btnClose.Add_Click({
-  $spotForm.Close(); $catcher.Close(); $canvas.Close(); $bar.Close()
-})
+$btnClose.Add_Click({ $spotForm.Close(); $catcher.Close(); $canvas.Close(); $bar.Close() })
 $bar.Controls.Add($btnClose)
 
 $bar.Width = $cx + 42
 $bar.Left  = [Math]::Max(16, [int](($screenW - $bar.Width) / 2))
 
-# Show Canvas & Ghost Bar
-$canvas.Show()
-Set-ClickThrough $canvas
-
-$bar.Show()
-Set-InvisibleInCapture $bar
+$canvas.Show(); Set-ClickThrough $canvas
+$bar.Show(); Set-InvisibleInCapture $bar
 Set-PresenterTool "cursor"
 
-# 60 FPS Live Tracking Loop for Spotlight Cutout, Laser & Pen Auto-Fade
 $tick = New-Object System.Windows.Forms.Timer
 $tick.Interval = 24
 $script:lastMp = [System.Drawing.Point]::Empty
