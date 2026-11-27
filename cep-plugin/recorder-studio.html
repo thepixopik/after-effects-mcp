@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Pixopik Recorder Studio v2.0</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: "Segoe UI", Inter, system-ui, sans-serif; }
+    body {
+      background: radial-gradient(circle at top right, #1e1b4b 0%, #0f172a 55%, #090d16 100%);
+      color: #f1f5f9; padding: 16px; user-select: none; overflow-x: hidden;
+    }
+    .top-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding-bottom: 12px; border-bottom: 1px solid rgba(148, 163, 184, 0.16); margin-bottom: 14px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .logo {
+      width: 34px; height: 34px; border-radius: 9px;
+      background: linear-gradient(135deg, #6366f1, #a855f7);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 900; font-size: 13px; letter-spacing: 0.5px;
+      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.45);
+    }
+    .brand-title { font-size: 14px; font-weight: 800; color: #fff; }
+    .brand-sub { font-size: 11px; color: #94a3b8; }
+    .pill-60 {
+      background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.35);
+      padding: 4px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 800;
+    }
+    .quick-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+    .btn-ghost {
+      background: rgba(30, 41, 59, 0.85); color: #e2e8f0; border: 1px solid #334155;
+      border-radius: 8px; padding: 9px 10px; font-size: 12px; font-weight: 700;
+      cursor: pointer; transition: all 0.15s ease;
+    }
+    .btn-ghost:hover { background: #334155; border-color: #6366f1; color: #fff; }
+    .card {
+      background: rgba(15, 23, 42, 0.72); border: 1px solid rgba(148, 163, 184, 0.16);
+      border-radius: 12px; padding: 12px; margin-bottom: 11px;
+    }
+    .sec-label {
+      font-size: 10.5px; font-weight: 800; text-transform: uppercase;
+      letter-spacing: 0.7px; color: #818cf8; margin-bottom: 9px;
+    }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-bottom: 9px; }
+    .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+    .field:last-child { margin-bottom: 0; }
+    label { font-size: 11px; font-weight: 600; color: #cbd5e1; }
+    select {
+      background: #1e293b; color: #f8fafc; border: 1px solid #334155;
+      border-radius: 7px; padding: 7px 9px; font-size: 12px; font-weight: 600; outline: none;
+    }
+    select:focus { border-color: #6366f1; }
+    .checks {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 6px;
+      font-size: 11.5px; color: #cbd5e1;
+    }
+    .checks label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11.5px; }
+    .btn-rec {
+      width: 100%; padding: 13px; border-radius: 10px; border: none; cursor: pointer;
+      font-size: 13.5px; font-weight: 800; color: #fff; letter-spacing: 0.3px;
+      background: linear-gradient(135deg, #e11d48 0%, #f43f5e 100%);
+      box-shadow: 0 6px 20px rgba(225, 29, 72, 0.45); transition: transform 0.12s ease;
+    }
+    .btn-rec:hover { filter: brightness(1.08); transform: translateY(-1px); }
+    .btn-stop {
+      width: 100%; padding: 13px; border-radius: 10px; border: none; cursor: pointer;
+      font-size: 13.5px; font-weight: 800; color: #fff;
+      background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+      margin-top: 8px; display: none;
+    }
+    .hint { text-align: center; font-size: 11px; color: #94a3b8; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="top-bar">
+    <div class="brand">
+      <div class="logo">PX</div>
+      <div>
+        <div class="brand-title">Pixopik Recorder Studio</div>
+        <div class="brand-sub">Dedicated Pro Capture &amp; Camera Engine</div>
+      </div>
+    </div>
+    <span class="pill-60" id="liveBadge">60 FPS PRO</span>
+  </div>
+
+  <div class="quick-row">
+    <button class="btn-ghost" onclick="sendAct('open_chrome')">🧼 Open Clean Chrome</button>
+    <button class="btn-ghost" onclick="sendAct('open_ghost')">👻 Open Draw Toolbar</button>
+  </div>
+
+  <div class="card">
+    <div class="sec-label">🎥 Camera &amp; Anti-Shake Control</div>
+    <div class="field">
+      <label>Camera Motion Style (Zero Mouse-Hover Shake)</label>
+      <select id="camMode">
+        <option value="dolly_steady">🎥 Pro Dolly Travel (Click-Driven, Rock-Steady)</option>
+        <option value="click_bounce">🎯 Classic Zoom In / Out on Clicks</option>
+        <option value="static_lock">📌 Static Locked Camera (0% Zoom / Move)</option>
+      </select>
+    </div>
+    <div class="grid-2" style="margin-top:8px;margin-bottom:0;">
+      <div class="field">
+        <label>Zoom Depth</label>
+        <select id="zoomDepth">
+          <option value="135">135% Gentle Zoom</option>
+          <option value="150" selected>150% Balanced Pro</option>
+          <option value="175">175% Deep Close-Up</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Anti-Shake Safe-Zone</label>
+        <select id="deadZone">
+          <option value="0.65" selected>🛡️ 65% Safe-Box (No Drift)</option>
+          <option value="0.45">⚖️ 45% Medium Box</option>
+          <option value="0.18">🎯 Pan on Every Click</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="sec-label">🎨 Layout, Cursor &amp; Comfort</div>
+    <div class="grid-2">
+      <div class="field">
+        <label>Editing Preset</label>
+        <select id="editPreset">
+          <option value="youtube_tutorial" selected>🎓 YouTube (95% Screen)</option>
+          <option value="saas_promo">🚀 SaaS Promo (84% 3D)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Video Format</label>
+        <select id="aspectPreset">
+          <option value="youtube_16_9" selected>16:9 Landscape</option>
+          <option value="shorts_9_16">9:16 Vertical Short</option>
+          <option value="square_1_1">1:1 Square</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="field">
+        <label>Cursor Stabilizer</label>
+        <select id="curSmooth">
+          <option value="high" selected>✨ Butter-Smooth</option>
+          <option value="raw">⚡ Raw Instant</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Eye-Safe Ghost Dimmer</label>
+        <select id="eyeDim" onchange="sendAct('set_dim', { pct: this.value })">
+          <option value="0">☀️ Off (100% Bright)</option>
+          <option value="30">🌙 30% Eye Comfort</option>
+          <option value="50">🌙 50% Night Dim</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-bottom:4px;">
+      <div class="field">
+        <label>Studio Backdrop</label>
+        <select id="wallpaper">
+          <option value="dark_carbon" selected>🖤 Dark Carbon</option>
+          <option value="cosmic_indigo">🌌 Cosmic Indigo</option>
+          <option value="ocean_breeze">🌊 Ocean Breeze</option>
+          <option value="sunset_saas">🔥 Sunset Coral</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Countdown</label>
+        <select id="countdown">
+          <option value="3" selected>⏱️ 3 Seconds</option>
+          <option value="5">⏱️ 5 Seconds</option>
+          <option value="0">⚡ Instant (0s)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="checks">
+      <label><input type="checkbox" id="chkSfx" checked /> 🔊 Click SFX</label>
+      <label><input type="checkbox" id="chkRip" checked /> 💫 Click Ripples</label>
+      <label><input type="checkbox" id="chkAutoRig" checked /> ⚡ Auto-Rig in AE</label>
+      <label><input type="checkbox" id="chkHideWin" checked /> 👻 Hide on Start</label>
+    </div>
+  </div>
+
+  <button id="btnStart" class="btn-rec" onclick="startStudio()">●  START STUDIO RECORDING (60 FPS)</button>
+  <button id="btnStop" class="btn-stop" onclick="stopStudio()">■  STOP &amp; SEND TO AFTER EFFECTS</button>
+  <div class="hint" id="statusHint">Hover shake is 0% — Camera glides only when clicking outside the Safe-Box.</div>
+
+  <script>
+    async function sendAct(action, extra) {
+      var res = await fetch("/api/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(Object.assign({ action: action }, extra || {}))
+      });
+      return res.json();
+    }
+
+    async function startStudio() {
+      var preset = document.getElementById("editPreset").value;
+      var cam    = document.getElementById("camMode").value;
+      var prefs  = {
+        editMode: preset,
+        aspectPreset: document.getElementById("aspectPreset").value,
+        cameraMode: cam,
+        zoomPercent: parseInt(document.getElementById("zoomDepth").value, 10),
+        deadZoneRatio: parseFloat(document.getElementById("deadZone").value),
+        cursorSmooth: document.getElementById("curSmooth").value,
+        wallpaper: document.getElementById("wallpaper").value,
+        frameStyle: preset === "youtube_tutorial" ? "minimal_rounded" : "macos_glass",
+        countdown: parseInt(document.getElementById("countdown").value, 10),
+        clickSfx: document.getElementById("chkSfx").checked,
+        clickRipples: document.getElementById("chkRip").checked,
+        autoRig: document.getElementById("chkAutoRig").checked,
+        autoZoom: cam !== "static_lock"
+      };
+      await sendAct("start_record", { prefs: prefs });
+      if (document.getElementById("chkHideWin").checked) {
+        document.getElementById("statusHint").textContent = "Launching invisible Ghost Pill recorder...";
+        setTimeout(function () { window.close(); }, 280);
+      } else {
+        document.getElementById("btnStart").style.display = "none";
+        document.getElementById("btnStop").style.display = "block";
+        document.getElementById("liveBadge").textContent = "● REC LIVE";
+      }
+    }
+
+    async function stopStudio() {
+      await sendAct("stop_record");
+      document.getElementById("btnStop").style.display = "none";
+      document.getElementById("btnStart").style.display = "block";
+      document.getElementById("liveBadge").textContent = "RIGGING AE...";
+    }
+  </script>
+</body>
+</html>
