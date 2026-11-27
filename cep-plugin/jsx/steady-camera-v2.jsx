@@ -31,6 +31,34 @@
     return "{" + p.join(",") + "}";
   }
 
+  function readStudioV2Prefs() {
+    try {
+      var up = $.getenv("USERPROFILE");
+      if (!up) return {};
+      var f = new File(up + "/Videos/PixopikRecordings/studio_v2_prefs.json");
+      if (f.exists && f.open("r")) {
+        f.encoding = "UTF-8";
+        var obj = eval("(" + f.read() + ")");
+        f.close();
+        return obj || {};
+      }
+    } catch (_e) {}
+    return {};
+  }
+
+  function smoothCursorKeysEMA(keys) {
+    if (!keys || keys.length < 4) return keys || [];
+    var out = [keys[0]];
+    var sx = keys[0].x, sy = keys[0].y;
+    for (var i = 1; i < keys.length - 1; i++) {
+      sx = sx + 0.44 * (keys[i].x - sx);
+      sy = sy + 0.44 * (keys[i].y - sy);
+      out.push({ t: keys[i].t, x: Math.round(sx), y: Math.round(sy) });
+    }
+    out.push(keys[keys.length - 1]);
+    return out;
+  }
+
   function setBatch(prop, pairs, dur) {
     if (!prop || !pairs || !pairs.length) return;
     pairs.sort(function (a, b) { return a.t - b.t; });
@@ -55,12 +83,12 @@
     for (var k = 1; k <= n; k++) {
       try {
         prop.setTemporalEaseAtKey(k, eIn, eOut);
-        prop.setSpatialContinuousAtKey(k, false); /* Linear spatial path = ZERO curved overshoot wobble! */
+        prop.setSpatialContinuousAtKey(k, false);
       } catch (_e) {}
     }
   }
 
-  /* ROCK-STEADY SAFE-ZONE CAMERA: 0% mouse-hover shake! Moves ONLY on outside-safe-box clicks/pins! */
+  /* ROCK-STEADY SAFE-ZONE CAMERA: 0% mouse-hover shake! Moves ONLY when clicking outside Safe-Box! */
   function buildRockSteadyDolly(comp, events, zoomPct, deadZoneRatio) {
     var camNull = null, curLayer = null;
     for (var l = 1; l <= comp.numLayers; l++) {
@@ -73,7 +101,7 @@
     var camScl = camNull.property("ADBE Transform Group").property("ADBE Scale");
     while (camPos.numKeys > 0) camPos.removeKey(camPos.numKeys);
     while (camScl.numKeys > 0) camScl.removeKey(camScl.numKeys);
-    camPos.expression = ""; /* Remove continuous Gimbal drift completely! */
+    camPos.expression = "";
     camScl.expression = "";
 
     var cx = comp.width / 2, cy = comp.height / 2, dur = comp.duration;
@@ -157,7 +185,16 @@
           var pf = new File(parsed.payloadFile);
           if (pf.exists && pf.open("r")) { pf.encoding = "UTF-8"; full = eval("(" + pf.read() + ")"); pf.close(); }
         }
-        var camMode = full.cameraMode || "dolly_steady";
+        var v2Prefs = readStudioV2Prefs();
+        var camMode = v2Prefs.cameraMode || full.cameraMode || "dolly_steady";
+        var zPct    = v2Prefs.zoomPercent || full.zoomPercent || 150;
+        var dzRatio = v2Prefs.deadZoneRatio || full.deadZoneRatio || 0.65;
+        var cSmooth = v2Prefs.cursorSmooth || "high";
+
+        if (cSmooth === "high" && full.motion && full.motion.cursorKeys) {
+          full.motion.cursorKeys = smoothCursorKeysEMA(full.motion.cursorKeys);
+        }
+
         if (camMode === "dolly_steady" || camMode === "smooth_travel" || camMode === "static_lock") {
           var origAuto = full.autoZoom;
           full.autoZoom = false;
@@ -175,7 +212,7 @@
             evts.sort(function (a, b) { return a.t - b.t; });
             app.beginUndoGroup("Rock-Steady Dolly Camera v2");
             try {
-              baseRes.autoZoomClusters = buildRockSteadyDolly(comp, evts, full.zoomPercent || 150, full.deadZoneRatio || 0.65);
+              baseRes.autoZoomClusters = buildRockSteadyDolly(comp, evts, zPct, dzRatio);
               baseRes.cameraMode = "dolly_steady_v2";
             } finally { app.endUndoGroup(); }
           }
@@ -194,9 +231,10 @@
           var sc = cur.property("ADBE Transform Group").property("ADBE Scale");
           for (var k = 2; k <= sc.numKeys; k += 3) evs.push({ t: sc.keyTime(k) });
         }
+        var vp = readStudioV2Prefs();
         app.beginUndoGroup("Apply Rock-Steady Dolly v2");
         try {
-          var mv = buildRockSteadyDolly(compA, evs, 150, 0.65);
+          var mv = buildRockSteadyDolly(compA, evs, vp.zoomPercent || 150, vp.deadZoneRatio || 0.65);
           return toJson({ ok: true, compName: compA.name, travelWaypoints: mv });
         } finally { app.endUndoGroup(); }
       } catch (e2) { return toJson({ ok: false, error: String(e2) }); }
