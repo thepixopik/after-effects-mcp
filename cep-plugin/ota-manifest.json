@@ -1,5 +1,5 @@
 {
-  "version": "1.6.5",
+  "version": "2.0.0",
   "repo": "thepixopik/after-effects-mcp",
   "branch": "main",
   "files": [
@@ -8,9 +8,12 @@
     "css/style.css",
     "js/auto-pref.js",
     "js/panel.js",
+    "js/studio-v2-patch.js",
     "jsx/host.jsx",
     "jsx/pro-studio-rig.jsx",
+    "jsx/steady-camera-v2.jsx",
     "recorder/capture-session.ps1",
+    "recorder/recorder-studio.ps1",
     "recorder/ghost-presenter.ps1",
     "recorder/ghost-dimmer.ps1",
     "recorder/studio-browser.ps1",
