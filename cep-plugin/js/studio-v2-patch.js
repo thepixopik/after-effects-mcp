@@ -22,10 +22,19 @@
   var PREFS_FILE  = path.join(REC_ROOT, "studio_v2_prefs.json");
   try { fs.mkdirSync(REC_ROOT, { recursive: true }); } catch (_e) {}
 
-  var verSub = document.getElementById("verSubtitle");
-  if (verSub) verSub.textContent = "Bandicam Pro Studio • v2.1";
-  var qBan = document.getElementById("quickBanner");
-  if (qBan) qBan.textContent = "v2.1 Live • Bandicam UI + Area / Rect / Window / Mouse Modes";
+  function syncHeaderBadges() {
+    var pill = document.getElementById("verPill") || document.querySelector(".pro-pill");
+    if (pill) pill.textContent = "v2.2";
+    var verSub = document.getElementById("verSubtitle");
+    if (verSub) verSub.textContent = "AE Post-Production & AI Hub";
+    var qBan = document.getElementById("quickBanner");
+    if (qBan && qBan.textContent.indexOf("1.6") !== -1) {
+      qBan.textContent = "v2.2 Clean Hub • Recording Managed in Floating Studio";
+    }
+  }
+  syncHeaderBadges();
+  setTimeout(syncHeaderBadges, 250);
+  setTimeout(syncHeaderBadges, 1200);
 
   function uiLog(msg) {
     var logList = document.getElementById("logList");
@@ -65,7 +74,7 @@
       try {
         var raw = JSON.parse((stdout || "[]").trim() || "[]");
         var arr = Array.isArray(raw) ? raw : [raw];
-        cb(arr.filter(function (w) { return w && w.MainWindowTitle && w.MainWindowTitle.indexOf("Pixopik Recorder") === -1; }));
+        cb(arr.filter(function (w) { return w && w.MainWindowTitle && w.MainWindowTitle.indexOf("Pixopik") === -1; }));
       } catch (_e) { cb([]); }
     });
   }
@@ -84,7 +93,6 @@
           out.push({
             id: dirs[i],
             sizeMb: (st.size / (1024 * 1024)).toFixed(1),
-            date: new Date(st.mtimeMs).toLocaleTimeString(),
             res: (meta.screenWidth || 1920) + "x" + (meta.screenHeight || 1080),
             dur: meta.duration ? (Math.round(meta.duration) + "s") : ""
           });
@@ -102,10 +110,7 @@
     var p = cp.spawn("powershell.exe", args, { windowsHide: false });
     p.on("close", function () {
       try {
-        if (fs.existsSync(outJson)) {
-          cb(JSON.parse(fs.readFileSync(outJson, "utf8")));
-          return;
-        }
+        if (fs.existsSync(outJson)) { cb(JSON.parse(fs.readFileSync(outJson, "utf8"))); return; }
       } catch (_er) {}
       cb({ ok: false });
     });
@@ -213,7 +218,7 @@
       var exe = findAppBrowserExe();
       if (exe) {
         cp.spawn(exe, ["--app=" + appUrl, "--window-size=760,520", "--window-position=520,170"], { detached: true, stdio: "ignore" }).unref();
-        uiLog("Launched Bandicam-Style Recorder Studio v2.1!");
+        uiLog("Launched Bandicam-Style Recorder Studio v2.2!");
       } else {
         window.open(appUrl, "PixopikRecorderStudio", "width=760,height=520");
       }

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Pixopik Motion Studio Pro v2.0.2</title>
+  <title>Pixopik Motion Studio Pro v2.2</title>
   <link rel="stylesheet" href="./css/style.css" />
   <style>
     .header-right { display: flex; align-items: center; gap: 6px; }
@@ -13,13 +13,16 @@
     }
     .btn-sync:hover { background: #4f46e5; color: #ffffff; border-color: #6366f1; }
     .btn-studio-hero {
-      width: 100%; padding: 12px 14px; font-size: 13px; font-weight: 800;
-      border-radius: 9px; border: 1px solid #818cf8; cursor: pointer;
-      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
-      color: #ffffff; box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4);
-      margin-bottom: 6px;
+      width: 100%; padding: 13px 14px; font-size: 13px; font-weight: 800;
+      border-radius: 9px; border: 1px solid #38bdf8; cursor: pointer;
+      background: linear-gradient(135deg, #0284c7 0%, #4f46e5 100%);
+      color: #ffffff; box-shadow: 0 4px 16px rgba(14, 165, 233, 0.35);
+      margin-bottom: 8px; transition: all 0.15s ease;
     }
-    .btn-studio-hero:hover { filter: brightness(1.1); }
+    .btn-studio-hero:hover { filter: brightness(1.1); transform: translateY(-1px); }
+    .studio-note {
+      font-size: 10.5px; color: #94a3b8; text-align: center; margin-bottom: 8px;
+    }
   </style>
 </head>
 <body>
@@ -28,8 +31,8 @@
       <div class="brand">
         <span class="badge-logo">PX</span>
         <div>
-          <div class="title">Pixopik Motion Studio <span class="pro-pill">v2.0.2</span></div>
-          <div class="subtitle" id="verSubtitle">Desktop Studio App • Zero-Shake Cam</div>
+          <div class="title">Pixopik Motion Studio <span class="pro-pill" id="verPill">v2.2</span></div>
+          <div class="subtitle" id="verSubtitle">AE Post-Production &amp; AI Hub</div>
         </div>
       </div>
       <div class="header-right">
@@ -41,104 +44,21 @@
       </div>
     </header>
 
-    <div id="quickBanner" class="quick-banner">v2.0.2 Ready • Native Desktop Studio Window + Zero-Shake Cam</div>
+    <div id="quickBanner" class="quick-banner">v2.2 Clean Hub • Recording Managed in Floating Studio</div>
 
+    <!-- CARD 1: DEDICATED CAPTURE LAUNCHER + POST-IMPORT -->
     <section class="card">
-      <div class="card-title">🎬 Dedicated Pro Screen Recorder App</div>
-      <button id="btnOpenRecorderStudio" class="btn-studio-hero">🚀 Launch Recorder Studio (Floating UI)</button>
-      <div class="btn-row">
-        <button id="btnLaunchChrome" class="btn btn-secondary">🧼 Clean Chrome</button>
-        <button id="btnGhostBar" class="btn btn-secondary">👻 Draw Toolbar</button>
-      </div>
-      <input id="chromeUrlInput" type="hidden" value="https://pixopik.com" />
-      <div class="field-col" style="margin-top:8px;">
-        <label>🌙 Eye-Safe Ghost Dimmer (Invisible in Video)</label>
-        <select id="ghostDimSelect">
-          <option value="0">☀️ Off (100% Monitor Brightness)</option>
-          <option value="30">🌙 30% Eye Dim</option>
-          <option value="50">🌙 50% Eye Dim (Replaces DimScreen)</option>
-          <option value="65">🌙 65% Deep Night Dim</option>
-        </select>
-      </div>
-    </section>
+      <div class="card-title">🎬 Screen Capture &amp; Import</div>
+      <button id="btnOpenRecorderStudio" class="btn-studio-hero">🚀 Launch Recorder Studio (Bandicam UI)</button>
+      <div class="studio-note">Area, Rectangle, Window, Camera, Chrome &amp; Dimmer live inside Recorder Studio.</div>
 
-    <section class="card">
-      <div class="card-title">1. Auto-Rig &amp; Camera Defaults</div>
+      <!-- Appears ONLY while a recording is actively running -->
+      <button id="btnStop" class="btn btn-stop hidden" style="width:100%;margin-bottom:6px;">■ Stop Active Recording &amp; Rig</button>
+      <div id="recTimer" class="timer hidden">00:00 • Recording in Progress...</div>
 
-      <div class="field-col">
-        <label>Editing Style Preset</label>
-        <select id="modeSelect">
-          <option value="youtube_tutorial">🎓 YouTube Tutorial (95% Big Screen • Flat Clean)</option>
-          <option value="saas_promo">🚀 SaaS Promo (84% Frame • 3D Showcase)</option>
-        </select>
-      </div>
-
-      <div class="field-col">
-        <label>Camera Motion Engine</label>
-        <select id="cameraModeSelect">
-          <option value="smooth_travel">🎥 Rock-Steady Dolly Travel (Zero Hover Shake)</option>
-          <option value="click_bounce">🎯 Classic Zoom In / Out on Clicks</option>
-        </select>
-      </div>
-
-      <div class="field-grid">
-        <div class="field-col">
-          <label>Format</label>
-          <select id="aspectSelect">
-            <option value="youtube_16_9">16:9 YouTube</option>
-            <option value="shorts_9_16">9:16 Shorts</option>
-            <option value="square_1_1">1:1 Square</option>
-          </select>
-        </div>
-        <div class="field-col">
-          <label>Studio Wallpaper</label>
-          <select id="wallpaperSelect">
-            <option value="dark_carbon">🖤 Dark Carbon</option>
-            <option value="cosmic_indigo">🌌 Cosmic Indigo</option>
-            <option value="ocean_breeze">🌊 Ocean Breeze</option>
-            <option value="sunset_saas">🔥 Sunset Coral</option>
-            <option value="clean_daylight">☀️ Clean Daylight</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="field-grid">
-        <div class="field-col">
-          <label>Window Chrome</label>
-          <select id="frameStyleSelect">
-            <option value="minimal_rounded">✨ Minimal Rounded</option>
-            <option value="macos_glass">🔴🟡🟢 macOS Glass</option>
-            <option value="sharp_clean">🖼️ Clean Shadow</option>
-          </select>
-        </div>
-        <div class="field-col">
-          <label>Quick Record Delay</label>
-          <select id="countdownSelect">
-            <option value="3">⏱️ 3s Delay</option>
-            <option value="5">⏱️ 5s Delay</option>
-            <option value="0">⚡ Instant</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="toggles">
-        <label><input type="checkbox" id="chkAutoRigOnStop" checked /> ⚡ Auto-Rig on Stop</label>
-        <label><input type="checkbox" id="chkClickSfx" checked /> 🔊 Click SFX</label>
-        <label><input type="checkbox" id="chkAutoGhost" /> 👻 Auto Draw Bar</label>
-        <label><input type="checkbox" id="chkAutoZoom" checked /> Smart Camera</label>
-        <label><input type="checkbox" id="chkVectorCursor" checked /> Vector Cursor</label>
-        <label><input type="checkbox" id="chkRipples" checked /> Click Ripples</label>
-      </div>
-
-      <div class="btn-row">
-        <button id="btnRecord" class="btn btn-record">● Quick Record</button>
-        <button id="btnStop" class="btn btn-stop hidden">■ Stop</button>
-      </div>
-      <div id="recTimer" class="timer hidden">00:00 • Recording...</div>
-
-      <div class="btn-row sub-actions">
-        <button id="btnRigLatest" class="btn btn-secondary">✨ Turbo-Rig Latest MP4</button>
-        <button id="btnImportTts" class="btn btn-secondary">🗣️ + Add TTS Voice</button>
+      <div class="btn-row sub-actions" style="margin-top:4px;">
+        <button id="btnRigLatest" class="btn btn-secondary">✨ Rig Latest MP4</button>
+        <button id="btnImportTts" class="btn btn-secondary">🎙️ + Add TTS Voice</button>
       </div>
 
       <div id="ffmpegBar" class="ffmpeg-bar hidden">
@@ -147,12 +67,13 @@
       </div>
     </section>
 
+    <!-- CARD 2: TIMELINE CREATOR & POLISH ACTIONS (NO SCROLLING NEEDED!) -->
     <section class="card">
-      <div class="card-title">2. One-Click Camera &amp; Creator Actions</div>
+      <div class="card-title">✨ Timeline Polish &amp; Creator Actions</div>
       <div class="grid-btns">
-        <button id="btnSmoothTravel" class="btn btn-chip accent-chip">🎥 Fix Camera Shake (Steady v2)</button>
-        <button id="btnSubscribe" class="btn btn-chip accent-chip">🔔 + YT Subscribe Pill</button>
-        <button id="btnChapter" class="btn btn-chip">📑 + YT Chapter Card</button>
+        <button id="btnSmoothTravel" class="btn btn-chip accent-chip">🎥 Fix Camera Shake</button>
+        <button id="btnSubscribe" class="btn btn-chip accent-chip">🔔 + YT Subscribe</button>
+        <button id="btnChapter" class="btn btn-chip">📑 + YT Chapter</button>
         <button id="btnSpotlight" class="btn btn-chip">💡 + Spotlight</button>
         <button id="btnBlur" class="btn btn-chip">🔒 + Privacy Blur</button>
         <button id="btnCallout" class="btn btn-chip">⌨️ + Shortcut Badge</button>
@@ -161,6 +82,7 @@
       </div>
     </section>
 
+    <!-- CARD 3: CLOUD MCP RELAY & ACTIVITY LOG -->
     <section class="card compact">
       <div class="ws-row">
         <input id="wsUrl" type="text" value="wss://after-effects-mcp.goutamboronew.workers.dev/ws" />
@@ -175,6 +97,41 @@
       </div>
       <div id="logList" class="log-list"></div>
     </section>
+  </div>
+
+  <!-- HIDDEN INTERNAL BRIDGE ELEMENTS (Controlled exclusively by Floating Recorder Studio — Zero UI Duplication!) -->
+  <div id="internalStudioState" style="display:none !important;" aria-hidden="true">
+    <input id="chromeUrlInput" type="text" value="https://pixopik.com" />
+    <button id="btnLaunchChrome" type="button"></button>
+    <button id="btnGhostBar" type="button"></button>
+    <select id="ghostDimSelect">
+      <option value="0" selected>0</option><option value="30">30</option><option value="50">50</option><option value="65">65</option>
+    </select>
+    <select id="modeSelect">
+      <option value="youtube_tutorial" selected>youtube_tutorial</option><option value="saas_promo">saas_promo</option>
+    </select>
+    <select id="cameraModeSelect">
+      <option value="smooth_travel" selected>smooth_travel</option><option value="click_bounce">click_bounce</option>
+    </select>
+    <select id="aspectSelect">
+      <option value="youtube_16_9" selected>youtube_16_9</option><option value="shorts_9_16">shorts_9_16</option><option value="square_1_1">square_1_1</option>
+    </select>
+    <select id="wallpaperSelect">
+      <option value="dark_carbon" selected>dark_carbon</option><option value="cosmic_indigo">cosmic_indigo</option><option value="ocean_breeze">ocean_breeze</option><option value="sunset_saas">sunset_saas</option><option value="clean_daylight">clean_daylight</option>
+    </select>
+    <select id="frameStyleSelect">
+      <option value="minimal_rounded" selected>minimal_rounded</option><option value="macos_glass">macos_glass</option><option value="sharp_clean">sharp_clean</option>
+    </select>
+    <select id="countdownSelect">
+      <option value="3" selected>3</option><option value="5">5</option><option value="0">0</option>
+    </select>
+    <input type="checkbox" id="chkAutoRigOnStop" checked />
+    <input type="checkbox" id="chkClickSfx" checked />
+    <input type="checkbox" id="chkAutoGhost" />
+    <input type="checkbox" id="chkAutoZoom" checked />
+    <input type="checkbox" id="chkVectorCursor" checked />
+    <input type="checkbox" id="chkRipples" checked />
+    <button id="btnRecord" type="button"></button>
   </div>
 
   <script src="./js/auto-pref.js"></script>
