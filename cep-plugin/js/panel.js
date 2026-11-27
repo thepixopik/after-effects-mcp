@@ -62,41 +62,64 @@
   }
 
   /* =========================================================================
-   * LIVE CLOUD OTA AUTO-UPDATER (Zero ZIP Download / Zero INSTALL_PLUGIN.bat!)
+   * INDIA ISP-SAFE CLOUD OTA UPDATER (jsDelivr CDN + GitHub JSON Base64 API!)
+   * Never uses blocked raw.githubusercontent.com (185.199.109.133)!
    * ========================================================================= */
-  function httpsGetBuffer(url, redirects) {
+  function httpsGetBuffer(url, timeoutMs, redirects) {
     return new Promise(function (resolve, reject) {
       if ((redirects || 0) > 4) return reject(new Error("Too many redirects"));
       var req = https.get(url, {
         headers: {
-          "User-Agent": "Pixopik-Motion-Studio-OTA/1.6",
+          "User-Agent": "Pixopik-Motion-Studio-OTA/1.6.2",
+          "Accept": "application/vnd.github.v3+json, */*",
           "Cache-Control": "no-cache"
         }
       }, function (res) {
         if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
           res.resume();
-          return resolve(httpsGetBuffer(res.headers.location, (redirects || 0) + 1));
+          return resolve(httpsGetBuffer(res.headers.location, timeoutMs, (redirects || 0) + 1));
         }
         if (res.statusCode !== 200) {
           res.resume();
-          return reject(new Error("HTTP " + res.statusCode + " for " + url));
+          return reject(new Error("HTTP " + res.statusCode + " (" + url + ")"));
         }
         var chunks = [];
         res.on("data", function (c) { chunks.push(c); });
         res.on("end", function () { resolve(Buffer.concat(chunks)); });
       });
       req.on("error", reject);
-      req.setTimeout(10000, function () { req.destroy(new Error("Timeout")); });
+      req.setTimeout(timeoutMs || 6500, function () { req.destroy(new Error("Timeout")); });
     });
   }
 
   async function fetchLatestCommitSha() {
     try {
-      var buf = await httpsGetBuffer("https://api.github.com/repos/" + GH_REPO + "/commits/main");
+      var buf = await httpsGetBuffer("https://api.github.com/repos/" + GH_REPO + "/commits/main", 6000);
       var parsed = JSON.parse(buf.toString("utf8"));
       if (parsed && parsed.sha) return parsed.sha;
     } catch (_e) {}
     return null;
+  }
+
+  async function downloadRepoFileSmart(commitSha, relPath) {
+    var cleanRel = relPath.replace(/^\/+/, "");
+    var ref = commitSha || "main";
+
+    /* 1. Try Cloudflare-backed jsDelivr CDN (unblocked across Jio/Airtel, unlimited rate!) */
+    try {
+      var cdnUrl = "https://cdn.jsdelivr.net/gh/" + GH_REPO + "@" + ref + "/cep-plugin/" + cleanRel;
+      var cdnBuf = await httpsGetBuffer(cdnUrl, 5000);
+      if (cdnBuf && cdnBuf.length > 5) return cdnBuf;
+    } catch (_eCdn) {}
+
+    /* 2. Fallback: GitHub Contents API JSON Base64 (100% via api.github.com, zero raw IP!) */
+    var apiUrl = "https://api.github.com/repos/" + GH_REPO + "/contents/cep-plugin/" + cleanRel + "?ref=" + encodeURIComponent(ref);
+    var apiBuf = await httpsGetBuffer(apiUrl, 8000);
+    var meta = JSON.parse(apiBuf.toString("utf8"));
+    if (meta && meta.content) {
+      return Buffer.from(String(meta.content).replace(/\s+/g, ""), "base64");
+    }
+    throw new Error("Empty content for " + cleanRel);
   }
 
   var otaBusy = false;
@@ -117,12 +140,7 @@
         return { ok: true, upToDate: true, commit: latestSha.slice(0, 7) };
       }
 
-      var ref = latestSha || ("main?t=" + Date.now());
-      var rawBase = latestSha
-        ? ("https://raw.githubusercontent.com/" + GH_REPO + "/" + latestSha + "/cep-plugin/")
-        : ("https://raw.githubusercontent.com/" + GH_REPO + "/main/cep-plugin/");
-
-      log("Pulling live cloud update (" + (latestSha ? latestSha.slice(0, 7) : "main") + ")...", "info");
+      log("Syncing cloud update (" + (latestSha ? latestSha.slice(0, 7) : "main") + ")...", "info");
 
       var defaultFiles = [
         "ota-manifest.json", "index.html", "css/style.css", "js/panel.js",
@@ -131,10 +149,10 @@
         "recorder/studio-browser.ps1", "recorder/install-ffmpeg.ps1"
       ];
       var fileList = defaultFiles;
-      var remoteVer = "1.6+";
+      var remoteVer = "1.6.2";
 
       try {
-        var manBuf = await httpsGetBuffer(rawBase + "ota-manifest.json" + (latestSha ? "" : ("?t=" + Date.now())));
+        var manBuf = await downloadRepoFileSmart(latestSha, "ota-manifest.json");
         var man = JSON.parse(manBuf.toString("utf8"));
         if (man && Array.isArray(man.files) && man.files.length > 0) fileList = man.files;
         if (man && man.version) remoteVer = man.version;
@@ -143,8 +161,7 @@
       var updatedCount = 0;
       for (var i = 0; i < fileList.length; i++) {
         var rel = fileList[i].replace(/^\/+/, "");
-        var url = rawBase + rel + (latestSha ? "" : ("?t=" + Date.now()));
-        var fileBuf = await httpsGetBuffer(url);
+        var fileBuf = await downloadRepoFileSmart(latestSha, rel);
         if (fileBuf && fileBuf.length > 5) {
           var dest = path.join(EXT_ROOT, rel);
           fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -158,7 +175,7 @@
       }
 
       loadExtendScripts(function () {});
-      log("Updated " + updatedCount + " files (v" + remoteVer + ")! Reloading panel...", "ok");
+      log("Synced " + updatedCount + " files (v" + remoteVer + ")! Reloading...", "ok");
 
       setTimeout(function () {
         window.location.reload();
@@ -291,12 +308,11 @@
 
   loadExtendScripts(function (res) {
     if (String(res).indexOf("OK") === 0) {
-      log("OTA v1.6 engine ready (Zero-Download Auto-Sync ON!)", "ok");
+      log("OTA v1.6.2 ready (India ISP-Safe Cloud Sync ON!)", "ok");
     } else {
       log("Engine init: " + res, "err");
     }
-    /* Silent background startup check for newer GitHub commits! */
-    setTimeout(function () { runOtaUpdate({ force: false, silent: true }); }, 1200);
+    setTimeout(function () { runOtaUpdate({ force: false, silent: true }); }, 1000);
   });
 
   if (modeSelect) {
@@ -565,7 +581,6 @@
   async function handleCommand(msg) {
     var action = msg.action, args = msg.args || {};
     log("MCP -> " + action, "info");
-    /* Remote Zero-Click Cloud OTA Trigger from Chat! */
     if (action === "sync_ota_update" || (action === "run_extendscript" && args && String(args.code || "").indexOf("__PIXOPIK_OTA_SYNC__") !== -1)) {
       return await runOtaUpdate({ force: true, silent: false });
     }
@@ -592,7 +607,7 @@
     var url = (wsInput.value || "").trim();
     setStatus(false, "Connecting...");
     ws = new WebSocket(url);
-    ws.onopen = function () { setStatus(true, "OTA v1.6"); log("Connected to Cloud MCP Relay!", "ok"); };
+    ws.onopen = function () { setStatus(true, "OTA v1.6.2"); log("Connected to Cloud MCP Relay!", "ok"); };
     ws.onmessage = async function (ev) {
       var msg;
       try { msg = JSON.parse(ev.data); } catch (_e) { return; }
