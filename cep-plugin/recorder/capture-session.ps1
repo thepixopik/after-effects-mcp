@@ -8,14 +8,17 @@ param(
 $ErrorActionPreference = "SilentlyContinue"
 New-Item -ItemType Directory -Force -Path $SessionDir | Out-Null
 
+$rawVideo          = Join-Path $SessionDir "video_raw.mp4"
+$micWav            = Join-Path $SessionDir "voiceover.wav"
 $videoOut          = Join-Path $SessionDir "screen.mp4"
 $motionOut         = Join-Path $SessionDir "motion.json"
 $script:stopSignal = Join-Path $SessionDir "stop.signal"
 $doneSignal        = Join-Path $SessionDir "done.signal"
 $script:stopReq    = $false
 
-if (Test-Path -LiteralPath $script:stopSignal) { Remove-Item -LiteralPath $script:stopSignal -Force }
-if (Test-Path -LiteralPath $doneSignal) { Remove-Item -LiteralPath $doneSignal -Force }
+foreach ($f in @($rawVideo, $micWav, $videoOut, $script:stopSignal, $doneSignal)) {
+  if (Test-Path -LiteralPath $f) { Remove-Item -LiteralPath $f -Force }
+}
 
 function Find-Ffmpeg {
   $cmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
@@ -51,7 +54,7 @@ function Find-DefaultMic([string]$ff) {
     $matchesAll = [regex]::Matches($errTxt, '"([^"]+)"\s+\(audio\)')
     foreach ($m in $matchesAll) {
       $nm = $m.Groups[1].Value
-      if ($nm -notmatch "Stereo Mix|Hands-Free AG") { return $nm }
+      if ($nm -notmatch "Stereo Mix|Hands-Free AG|Virtual") { return $nm }
     }
     if ($matchesAll.Count -gt 0) { return $matchesAll[0].Groups[1].Value }
   } catch {}
@@ -120,21 +123,13 @@ if ($Countdown -gt 0) {
   }
 }
 
-$filtersTxt  = & $ffmpegExe -hide_banner -filters 2>&1 | Out-String
-$encodersTxt = & $ffmpegExe -hide_banner -encoders 2>&1 | Out-String
-$hasDda   = $filtersTxt -match "ddagrab"
-$hasNvenc = $encodersTxt -match "h264_nvenc"
+$filtersTxt = & $ffmpegExe -hide_banner -filters 2>&1 | Out-String
+$hasDda = $filtersTxt -match "ddagrab"
 
-function Start-CaptureProcess([bool]$useDda, [bool]$useNvenc, [string]$micDev) {
-  $vCodec = if ($useNvenc) { "-c:v h264_nvenc -preset p2 -cq 20" } else { "-c:v libx264 -preset ultrafast -crf 20 -threads 0" }
-  $vInput = if ($useDda) { "-f lavfi -i `"ddagrab=framerate=$Fps`:draw_mouse=0,hwdownload,format=bgra`"" } else { "-f gdigrab -framerate $Fps -draw_mouse 0 -i desktop" }
-  $aPart  = if ($micDev) { "-f dshow -rtbufsize 128M -i audio=`"$micDev`" -c:a aac -b:a 192k" } else { "" }
-
-  # -loglevel error prevents stderr buffer deadlock on long recordings!
-  $argsStr = "-y -loglevel error $vInput $aPart $vCodec -pix_fmt yuv420p -movflags +faststart `"$videoOut`""
+function Start-Proc([string]$exe, [string]$arguments) {
   $pInfo = New-Object System.Diagnostics.ProcessStartInfo
-  $pInfo.FileName = $ffmpegExe
-  $pInfo.Arguments = $argsStr
+  $pInfo.FileName = $exe
+  $pInfo.Arguments = $arguments
   $pInfo.RedirectStandardInput = $true
   $pInfo.UseShellExecute = $false
   $pInfo.CreateNoWindow = $true
@@ -144,15 +139,36 @@ function Start-CaptureProcess([bool]$useDda, [bool]$useNvenc, [string]$micDev) {
   return $proc
 }
 
-$ffProc = Start-CaptureProcess -useDda $hasDda -useNvenc $hasNvenc -micDev $micName
-Start-Sleep -Milliseconds 420
-if ($ffProc.HasExited -and $micName) {
-  $ffProc = Start-CaptureProcess -useDda $false -useNvenc $false -micDev $micName
-  Start-Sleep -Milliseconds 350
+# Pure libx264 ultrafast works on 100% of Intel/AMD/NVIDIA PCs (eliminates fake h264_nvenc crashes!)
+function Start-VideoCapture([bool]$useDda) {
+  $vIn = if ($useDda) {
+    "-f lavfi -i `"ddagrab=framerate=$Fps`:draw_mouse=0,hwdownload,format=bgra`""
+  } else {
+    "-f gdigrab -framerate $Fps -draw_mouse 0 -i desktop"
+  }
+  $args = "-y -loglevel error $vIn -vf `"scale=trunc(iw/2)*2:trunc(ih/2)*2`" -c:v libx264 -preset ultrafast -crf 20 -pix_fmt yuv420p `"$rawVideo`""
+  return Start-Proc $ffmpegExe $args
 }
-if ($ffProc.HasExited) {
-  $micName = $null
-  $ffProc = Start-CaptureProcess -useDda $false -useNvenc $false -micDev $null
+
+function Start-MicCapture([string]$dev) {
+  $args = "-y -loglevel error -f dshow -rtbufsize 128M -i `"audio=$dev`" -ac 1 -ar 48000 `"$micWav`""
+  return Start-Proc $ffmpegExe $args
+}
+
+$usedDda = $hasDda
+$vProc = Start-VideoCapture -useDda $usedDda
+Start-Sleep -Milliseconds 900
+if ($vProc.HasExited -and $usedDda) {
+  $usedDda = $false
+  $vProc = Start-VideoCapture -useDda $false
+  Start-Sleep -Milliseconds 500
+}
+
+$micProc = $null
+if ($micName) {
+  $micProc = Start-MicCapture -dev $micName
+  Start-Sleep -Milliseconds 250
+  if ($micProc.HasExited) { $micProc = $null; $micName = $null }
 }
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -160,11 +176,26 @@ $samples = New-Object System.Collections.Generic.List[object]
 $clicks  = New-Object System.Collections.Generic.List[object]
 $wasLeftDown = $false
 $wasRightDown = $false
-$micTag = if ($micName) { "MIC ON" } else { "60 FPS" }
+$retriedGdi = $false
+$micTag = if ($micProc -and -not $micProc.HasExited) { "MIC ON" } else { "60 FPS" }
 
-while (-not $ffProc.HasExited) {
+while ($true) {
   [System.Windows.Forms.Application]::DoEvents()
   if ($script:stopReq -or (Test-Path -LiteralPath $script:stopSignal)) { break }
+
+  if ($vProc.HasExited) {
+    # Self-heal if hybrid-GPU ddagrab exited late!
+    if ($usedDda -and -not $retriedGdi -and $sw.Elapsed.TotalSeconds -lt 3.0) {
+      $usedDda = $false
+      $retriedGdi = $true
+      $samples.Clear(); $clicks.Clear()
+      $vProc = Start-VideoCapture -useDda $false
+      $sw.Restart()
+      Start-Sleep -Milliseconds 300
+      continue
+    }
+    break
+  }
 
   $t = [Math]::Round($sw.Elapsed.TotalSeconds, 3)
   $sec = [int][Math]::Floor($t)
@@ -191,25 +222,44 @@ while (-not $ffProc.HasExited) {
   Start-Sleep -Milliseconds 16
 }
 
-$lbl.Text = "Saving MP4 + Audio..."
+$lbl.Text = "Saving MP4 + Mic..."
 [System.Windows.Forms.Application]::DoEvents()
 
-try {
-  if (-not $ffProc.HasExited) {
-    $ffProc.StandardInput.Write("q`n")
-    $ffProc.StandardInput.Flush()
-    $ffProc.StandardInput.Close()
-    $ffProc.WaitForExit(5000) | Out-Null
+foreach ($pr in @($vProc, $micProc)) {
+  if ($pr -and -not $pr.HasExited) {
+    try {
+      $pr.StandardInput.Write("q`n")
+      $pr.StandardInput.Flush()
+      $pr.StandardInput.Close()
+      $pr.WaitForExit(5000) | Out-Null
+    } catch {}
+    if (-not $pr.HasExited) { try { $pr.Kill() } catch {} }
   }
-  if (-not $ffProc.HasExited) { $ffProc.Kill() }
-} catch {}
+}
 
 try { $pill.Close(); $pill.Dispose() } catch {}
 
+# Instant stream-copy mux of video_raw.mp4 + voiceover.wav -> screen.mp4
+$hasVideo = (Test-Path -LiteralPath $rawVideo) -and ((Get-Item -LiteralPath $rawVideo).Length -gt 1000)
+$hasAudio = (Test-Path -LiteralPath $micWav) -and ((Get-Item -LiteralPath $micWav).Length -gt 2000)
+
+if ($hasVideo -and $hasAudio) {
+  $muxArgs = "-y -loglevel error -i `"$rawVideo`" -i `"$micWav`" -c:v copy -c:a aac -b:a 192k -map 0:v:0 -map 1:a:0 -shortest -movflags +faststart `"$videoOut`""
+  $muxProc = Start-Proc $ffmpegExe $muxArgs
+  $muxProc.WaitForExit(12000) | Out-Null
+  if (-not ((Test-Path -LiteralPath $videoOut) -and ((Get-Item -LiteralPath $videoOut).Length -gt 1000))) {
+    Copy-Item -LiteralPath $rawVideo -Destination $videoOut -Force
+  } else {
+    Remove-Item -LiteralPath $rawVideo -Force -ErrorAction SilentlyContinue
+  }
+} elseif ($hasVideo) {
+  Move-Item -LiteralPath $rawVideo -Destination $videoOut -Force
+}
+
 $payload = @{
-  version      = "1.1.1"
+  version      = "1.2.1"
   fps          = $Fps
-  hasMicAudio  = [bool]$micName
+  hasMicAudio  = $hasAudio
   screenWidth  = $screenW
   screenHeight = $screenH
   duration     = [Math]::Round($sw.Elapsed.TotalSeconds, 3)
