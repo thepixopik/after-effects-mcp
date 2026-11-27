@@ -1,7 +1,8 @@
 param(
   [Parameter(Mandatory=$true)][string]$SessionDir,
   [int]$Fps = 60,
-  [int]$Countdown = 3
+  [int]$Countdown = 3,
+  [int]$UseMic = 0
 )
 
 $ErrorActionPreference = "SilentlyContinue"
@@ -35,6 +36,15 @@ if (-not $ffmpegExe) {
   exit 1
 }
 
+function Find-DefaultMic([string]$ff) {
+  $devOut = & $ff -hide_banner -list_devices true -f dshow -i dummy 2>&1 | Out-String
+  $m = [regex]::Match($devOut, '"([^"]+)"\s+\(audio\)')
+  if ($m.Success) { return $m.Groups[1].Value }
+  return $null
+}
+
+$micName = if ($UseMic -eq 1) { Find-DefaultMic $ffmpegExe } else { $null }
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
@@ -42,35 +52,35 @@ $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $screenW = $bounds.Width
 $screenH = $bounds.Height
 
-# Floating Pro Recorder Mini-Bar (Top-Right)
+# Floating Recorder Mini-Bar (Top-Right)
 $pill = New-Object System.Windows.Forms.Form
 $pill.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $pill.TopMost = $true
 $pill.ShowInTaskbar = $false
 $pill.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
-$pill.Width = 270
+$pill.Width = 286
 $pill.Height = 42
-$pill.Left = [Math]::Max(20, $screenW - 290)
+$pill.Left = [Math]::Max(20, $screenW - 306)
 $pill.Top = 18
 $pill.BackColor = [System.Drawing.Color]::FromArgb(15, 23, 42)
 $pill.Opacity = 0.94
 
 $lbl = New-Object System.Windows.Forms.Label
 $lbl.ForeColor = [System.Drawing.Color]::FromArgb(248, 250, 252)
-$lbl.Font = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Bold)
+$lbl.Font = New-Object System.Drawing.Font("Segoe UI", 9.2, [System.Drawing.FontStyle]::Bold)
 $lbl.AutoSize = $false
 $lbl.Left = 12
 $lbl.Top = 0
-$lbl.Width = 158
+$lbl.Width = 172
 $lbl.Height = 42
 $lbl.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
 $pill.Controls.Add($lbl)
 
 $stopBtn = New-Object System.Windows.Forms.Button
 $stopBtn.Text = "Stop & Rig"
-$stopBtn.Left = 174
+$stopBtn.Left = 188
 $stopBtn.Top = 7
-$stopBtn.Width = 86
+$stopBtn.Width = 88
 $stopBtn.Height = 28
 $stopBtn.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
 $stopBtn.FlatAppearance.BorderSize = 0
@@ -93,19 +103,17 @@ if ($Countdown -gt 0) {
   }
 }
 
-# Detect GPU ddagrab + NVENC capability for butter-smooth 60fps on 2K/4K
 $filtersTxt = & $ffmpegExe -hide_banner -filters 2>&1 | Out-String
 $encodersTxt = & $ffmpegExe -hide_banner -encoders 2>&1 | Out-String
 $hasDda = $filtersTxt -match "ddagrab"
 $hasNvenc = $encodersTxt -match "h264_nvenc"
 
-function Start-CaptureProcess([bool]$useDda, [bool]$useNvenc) {
+function Start-CaptureProcess([bool]$useDda, [bool]$useNvenc, [string]$micDev) {
   $vCodec = if ($useNvenc) { "-c:v h264_nvenc -preset p2 -cq 20" } else { "-c:v libx264 -preset ultrafast -tune zerolatency -crf 20 -threads 0" }
-  if ($useDda) {
-    $argsStr = "-y -f lavfi -i `"ddagrab=framerate=$Fps`:draw_mouse=0,hwdownload,format=bgra`" $vCodec -pix_fmt yuv420p `"$videoOut`""
-  } else {
-    $argsStr = "-y -f gdigrab -framerate $Fps -draw_mouse 0 -i desktop $vCodec -pix_fmt yuv420p `"$videoOut`""
-  }
+  $vInput = if ($useDda) { "-f lavfi -i `"ddagrab=framerate=$Fps`:draw_mouse=0,hwdownload,format=bgra`"" } else { "-f gdigrab -framerate $Fps -draw_mouse 0 -i desktop" }
+  $aPart  = if ($micDev) { "-f dshow -rtbufsize 128M -i audio=`"$micDev`" -c:a aac -b:a 192k" } else { "" }
+
+  $argsStr = "-y $vInput $aPart $vCodec -pix_fmt yuv420p `"$videoOut`""
   $pInfo = New-Object System.Diagnostics.ProcessStartInfo
   $pInfo.FileName = $ffmpegExe
   $pInfo.Arguments = $argsStr
@@ -118,10 +126,15 @@ function Start-CaptureProcess([bool]$useDda, [bool]$useNvenc) {
   return $proc
 }
 
-$ffProc = Start-CaptureProcess -useDda $hasDda -useNvenc $hasNvenc
-Start-Sleep -Milliseconds 350
+$ffProc = Start-CaptureProcess -useDda $hasDda -useNvenc $hasNvenc -micDev $micName
+Start-Sleep -Milliseconds 380
+if ($ffProc.HasExited -and $micName) {
+  $ffProc = Start-CaptureProcess -useDda $false -useNvenc $false -micDev $micName
+  Start-Sleep -Milliseconds 320
+}
 if ($ffProc.HasExited) {
-  $ffProc = Start-CaptureProcess -useDda $false -useNvenc $false
+  $micName = $null
+  $ffProc = Start-CaptureProcess -useDda $false -useNvenc $false -micDev $null
 }
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -129,6 +142,7 @@ $samples = New-Object System.Collections.Generic.List[object]
 $clicks  = New-Object System.Collections.Generic.List[object]
 $wasLeftDown = $false
 $wasRightDown = $false
+$micTag = if ($micName) { "MIC ON" } else { "60 FPS" }
 
 while (-not $ffProc.HasExited) {
   [System.Windows.Forms.Application]::DoEvents()
@@ -138,7 +152,7 @@ while (-not $ffProc.HasExited) {
   $sec = [int][Math]::Floor($t)
   $mm = "{0:D2}" -f [int][Math]::Floor($sec / 60)
   $ss = "{0:D2}" -f ($sec % 60)
-  $lbl.Text = "REC $mm`:$ss • 60 FPS"
+  $lbl.Text = "REC $mm`:$ss • $micTag"
 
   $pos = [System.Windows.Forms.Cursor]::Position
   $btns = [System.Windows.Forms.Control]::MouseButtons
@@ -159,7 +173,7 @@ while (-not $ffProc.HasExited) {
   Start-Sleep -Milliseconds 16
 }
 
-$lbl.Text = "Saving 60fps MP4..."
+$lbl.Text = "Saving MP4 + Audio..."
 [System.Windows.Forms.Application]::DoEvents()
 
 try {
@@ -175,8 +189,9 @@ $pill.Close()
 $pill.Dispose()
 
 $payload = @{
-  version      = "1.0"
+  version      = "1.1"
   fps          = $Fps
+  hasMicAudio  = [bool]$micName
   screenWidth  = $screenW
   screenHeight = $screenH
   duration     = [Math]::Round($sw.Elapsed.TotalSeconds, 3)

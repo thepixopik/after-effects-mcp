@@ -12,7 +12,7 @@
         <span class="badge-logo">PX</span>
         <div>
           <div class="title">Pixopik Motion Studio <span class="pro-pill">PRO</span></div>
-          <div class="subtitle">Screen Studio for After Effects • v1.0</div>
+          <div class="subtitle">SaaS &amp; YouTube Studio • v1.1</div>
         </div>
       </div>
       <div id="statusBadge" class="status disconnected">
@@ -21,10 +21,18 @@
       </div>
     </header>
 
-    <div id="quickBanner" class="quick-banner">v1.0 Pro Ready • 3s Countdown + Floating Stop Bar</div>
+    <div id="quickBanner" class="quick-banner">v1.1 Ready • SaaS Promo + YouTube Tutorial + Live Mic</div>
 
     <section class="card">
-      <div class="card-title">1. Pro Screen Studio Recorder (60 FPS)</div>
+      <div class="card-title">1. Studio Screen + Mic Recorder (60 FPS)</div>
+
+      <div class="field-col">
+        <label>Editing Style Preset</label>
+        <select id="modeSelect">
+          <option value="saas_promo">🚀 SaaS Promo (84% Frame • 3D + 178% Zoom)</option>
+          <option value="youtube_tutorial">🎓 YouTube Tutorial (95% Big Screen • Flat 145% Zoom)</option>
+        </select>
+      </div>
 
       <div class="field-grid">
         <div class="field-col">
@@ -39,9 +47,9 @@
           <label>Studio Wallpaper</label>
           <select id="wallpaperSelect">
             <option value="cosmic_indigo">🌌 Cosmic Indigo</option>
+            <option value="dark_carbon">🖤 Dark Carbon (Best YT)</option>
             <option value="ocean_breeze">🌊 Ocean Breeze</option>
             <option value="sunset_saas">🔥 Sunset Coral</option>
-            <option value="dark_carbon">🖤 Dark Carbon</option>
             <option value="clean_daylight">☀️ Clean Daylight</option>
           </select>
         </div>
@@ -52,35 +60,36 @@
           <label>Window Chrome</label>
           <select id="frameStyleSelect">
             <option value="macos_glass">🔴🟡🟢 macOS Glass Frame</option>
-            <option value="minimal_rounded">✨ Minimal Rounded Glass</option>
+            <option value="minimal_rounded">✨ Minimal Rounded (Best YT)</option>
             <option value="sharp_clean">🖼️ Clean Shadow Only</option>
           </select>
         </div>
         <div class="field-col">
           <label>Start Delay</label>
           <select id="countdownSelect">
-            <option value="3">⏱️ 3s + Hide AE (Best)</option>
-            <option value="5">⏱️ 5s + Hide AE</option>
-            <option value="0">⚡ Instant (Keep AE Open)</option>
+            <option value="3">⏱️ 3s + Switch App</option>
+            <option value="5">⏱️ 5s + Switch App</option>
+            <option value="0">⚡ Instant Start</option>
           </select>
         </div>
       </div>
 
       <div class="toggles">
+        <label><input type="checkbox" id="chkMicAudio" /> 🎙️ Live Mic Voiceover</label>
         <label><input type="checkbox" id="chkAutoZoom" checked /> Smart Click-Zoom</label>
-        <label><input type="checkbox" id="chkVectorCursor" checked /> macOS Vector Cursor</label>
-        <label><input type="checkbox" id="chkRipples" checked /> Dual Click Ripples</label>
-        <label><input type="checkbox" id="chkMotionBlur" checked /> Motion Blur (Full Res)</label>
+        <label><input type="checkbox" id="chkVectorCursor" checked /> Crisp Vector Cursor</label>
+        <label><input type="checkbox" id="chkRipples" checked /> Click Ripples</label>
+        <label><input type="checkbox" id="chkMotionBlur" checked /> Motion Blur</label>
       </div>
 
       <div class="btn-row">
-        <button id="btnRecord" class="btn btn-record">● Start Pro Screen Record</button>
+        <button id="btnRecord" class="btn btn-record">● Start Studio Record</button>
         <button id="btnStop" class="btn btn-stop hidden">■ Stop &amp; Auto-Rig Studio</button>
       </div>
       <div id="recTimer" class="timer hidden">00:00 • Floating Stop Pill Active...</div>
 
       <div class="btn-row sub-actions">
-        <button id="btnRigLatest" class="btn btn-secondary">✨ Pro-Rig Latest MP4</button>
+        <button id="btnRigLatest" class="btn btn-secondary">✨ Auto-Rig Latest MP4</button>
         <button id="btnRigFile" class="btn btn-secondary">📂 Import Any MP4</button>
       </div>
 
@@ -91,16 +100,16 @@
     </section>
 
     <section class="card">
-      <div class="card-title">2. One-Click SaaS Polish</div>
+      <div class="card-title">2. One-Click YouTube &amp; SaaS Graphics</div>
       <div class="grid-btns">
-        <button id="btnUpgradeComp" class="btn btn-chip accent-chip">🪄 Upgrade Active Comp</button>
+        <button id="btnSubscribe" class="btn btn-chip accent-chip">🔔 + YT Subscribe Pill</button>
+        <button id="btnChapter" class="btn btn-chip accent-chip">📑 + YT Chapter Card</button>
         <button id="btnAddZoom" class="btn btn-chip">🔍 + Smart Zoom</button>
         <button id="btnSpotlight" class="btn btn-chip">💡 + Spotlight</button>
         <button id="btnBlur" class="btn btn-chip">🔒 + Privacy Blur</button>
-        <button id="btnCallout" class="btn btn-chip">💬 + SaaS Callout</button>
+        <button id="btnCallout" class="btn btn-chip">⌨️ + Shortcut Badge</button>
         <button id="btnShorts" class="btn btn-chip">📱 Make 9:16 Short</button>
         <button id="btn3dTilt" class="btn btn-chip">🎲 3D Showcase Tilt</button>
-        <button id="btnNewComp" class="btn btn-chip">🎬 + Blank Studio</button>
       </div>
     </section>
 
