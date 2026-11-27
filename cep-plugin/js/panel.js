@@ -23,16 +23,17 @@
     return path.normalize(decodeURIComponent(raw));
   }
 
-  var EXT_ROOT       = getExtRoot();
-  var OTA_SHA_FILE   = path.join(EXT_ROOT, ".ota_sha");
-  var HOST_JSX       = path.join(EXT_ROOT, "jsx", "host.jsx");
-  var PRO_RIG_JSX    = path.join(EXT_ROOT, "jsx", "pro-studio-rig.jsx");
-  var REC_SCRIPT     = path.join(EXT_ROOT, "recorder", "capture-session.ps1");
-  var GHOST_SCRIPT   = path.join(EXT_ROOT, "recorder", "ghost-presenter.ps1");
-  var BROWSER_SCRIPT = path.join(EXT_ROOT, "recorder", "studio-browser.ps1");
-  var INST_SCRIPT    = path.join(EXT_ROOT, "recorder", "install-ffmpeg.ps1");
-  var REC_ROOT       = path.join(os.homedir(), "Videos", "PixopikRecordings");
-  var GH_REPO        = "thepixopik/after-effects-mcp";
+  var EXT_ROOT        = getExtRoot();
+  var OTA_SHA_FILE    = path.join(EXT_ROOT, ".ota_sha");
+  var HOST_JSX        = path.join(EXT_ROOT, "jsx", "host.jsx");
+  var PRO_RIG_JSX     = path.join(EXT_ROOT, "jsx", "pro-studio-rig.jsx");
+  var REC_SCRIPT      = path.join(EXT_ROOT, "recorder", "capture-session.ps1");
+  var GHOST_SCRIPT    = path.join(EXT_ROOT, "recorder", "ghost-presenter.ps1");
+  var DIMMER_SCRIPT   = path.join(EXT_ROOT, "recorder", "ghost-dimmer.ps1");
+  var BROWSER_SCRIPT  = path.join(EXT_ROOT, "recorder", "studio-browser.ps1");
+  var INST_SCRIPT     = path.join(EXT_ROOT, "recorder", "install-ffmpeg.ps1");
+  var REC_ROOT        = path.join(os.homedir(), "Videos", "PixopikRecordings");
+  var GH_REPO         = "thepixopik/after-effects-mcp";
   try { fs.mkdirSync(REC_ROOT, { recursive: true }); } catch (_e) {}
 
   var statusBadge      = document.getElementById("statusBadge");
@@ -52,6 +53,7 @@
   var chkClickSfx      = document.getElementById("chkClickSfx");
   var chkAutoGhost     = document.getElementById("chkAutoGhost");
   var btnOtaSync       = document.getElementById("btnOtaSync");
+  var ghostDimSelect   = document.getElementById("ghostDimSelect");
 
   function log(msg, level) {
     var row = document.createElement("div");
@@ -61,16 +63,12 @@
     while (logList.children.length > 60) logList.removeChild(logList.lastChild);
   }
 
-  /* =========================================================================
-   * INDIA ISP-SAFE CLOUD OTA UPDATER (jsDelivr CDN + GitHub JSON Base64 API!)
-   * Never uses blocked raw.githubusercontent.com (185.199.109.133)!
-   * ========================================================================= */
   function httpsGetBuffer(url, timeoutMs, redirects) {
     return new Promise(function (resolve, reject) {
       if ((redirects || 0) > 4) return reject(new Error("Too many redirects"));
       var req = https.get(url, {
         headers: {
-          "User-Agent": "Pixopik-Motion-Studio-OTA/1.6.2",
+          "User-Agent": "Pixopik-Motion-Studio-OTA/1.6.3",
           "Accept": "application/vnd.github.v3+json, */*",
           "Cache-Control": "no-cache"
         }
@@ -104,15 +102,12 @@
   async function downloadRepoFileSmart(commitSha, relPath) {
     var cleanRel = relPath.replace(/^\/+/, "");
     var ref = commitSha || "main";
-
-    /* 1. Try Cloudflare-backed jsDelivr CDN (unblocked across Jio/Airtel, unlimited rate!) */
     try {
       var cdnUrl = "https://cdn.jsdelivr.net/gh/" + GH_REPO + "@" + ref + "/cep-plugin/" + cleanRel;
       var cdnBuf = await httpsGetBuffer(cdnUrl, 5000);
       if (cdnBuf && cdnBuf.length > 5) return cdnBuf;
     } catch (_eCdn) {}
 
-    /* 2. Fallback: GitHub Contents API JSON Base64 (100% via api.github.com, zero raw IP!) */
     var apiUrl = "https://api.github.com/repos/" + GH_REPO + "/contents/cep-plugin/" + cleanRel + "?ref=" + encodeURIComponent(ref);
     var apiBuf = await httpsGetBuffer(apiUrl, 8000);
     var meta = JSON.parse(apiBuf.toString("utf8"));
@@ -146,10 +141,10 @@
         "ota-manifest.json", "index.html", "css/style.css", "js/panel.js",
         "jsx/host.jsx", "jsx/pro-studio-rig.jsx",
         "recorder/capture-session.ps1", "recorder/ghost-presenter.ps1",
-        "recorder/studio-browser.ps1", "recorder/install-ffmpeg.ps1"
+        "recorder/ghost-dimmer.ps1", "recorder/studio-browser.ps1", "recorder/install-ffmpeg.ps1"
       ];
       var fileList = defaultFiles;
-      var remoteVer = "1.6.2";
+      var remoteVer = "1.6.3";
 
       try {
         var manBuf = await downloadRepoFileSmart(latestSha, "ota-manifest.json");
@@ -204,6 +199,25 @@
       "-NoProfile", "-ExecutionPolicy", "Bypass", "-STA",
       "-EncodedCommand", encoded
     ], Object.assign({ windowsHide: true }, opts || {}));
+  }
+
+  /* Built-in Eye-Safe Ghost Dimmer (100% invisible in MP4 & screenshots, zero DimScreen conflict!) */
+  var ghostDimProc = null;
+  if (ghostDimSelect) {
+    ghostDimSelect.onchange = function () {
+      var pct = parseInt(ghostDimSelect.value || "0", 10);
+      if (ghostDimProc && !ghostDimProc.killed) {
+        try { ghostDimProc.kill(); } catch (_e) {}
+        ghostDimProc = null;
+      }
+      if (pct > 0) {
+        ghostDimProc = spawnEncodedPowerShell("& " + psSingleQuote(DIMMER_SCRIPT) + " -DimPercent " + String(pct));
+        ghostDimProc.on("exit", function () { ghostDimProc = null; });
+        log("Ghost Eye Dimmer ON (" + pct + "% dim for eyes, 100% bright in MP4!)", "ok");
+      } else {
+        log("Ghost Eye Dimmer OFF (100% monitor brightness)", "info");
+      }
+    };
   }
 
   function buildSingleClickTrackWav(clicks, durationSec, outWavPath) {
@@ -308,7 +322,7 @@
 
   loadExtendScripts(function (res) {
     if (String(res).indexOf("OK") === 0) {
-      log("OTA v1.6.2 ready (India ISP-Safe Cloud Sync ON!)", "ok");
+      log("OTA v1.6.3 ready (Built-In Ghost Eye Dimmer Ready!)", "ok");
     } else {
       log("Engine init: " + res, "err");
     }
@@ -581,7 +595,7 @@
   async function handleCommand(msg) {
     var action = msg.action, args = msg.args || {};
     log("MCP -> " + action, "info");
-    if (action === "sync_ota_update" || (action === "run_extendscript" && args && String(args.code || "").indexOf("__PIXOPIK_OTA_SYNC__") !== -1)) {
+    if (action === "sync_ota_update" || (action === "run_extendscript" && args && String(args.script || args.code || "").indexOf("__PIXOPIK_OTA_SYNC__") !== -1)) {
       return await runOtaUpdate({ force: true, silent: false });
     }
     if (action === "get_project_info") {
@@ -607,7 +621,7 @@
     var url = (wsInput.value || "").trim();
     setStatus(false, "Connecting...");
     ws = new WebSocket(url);
-    ws.onopen = function () { setStatus(true, "OTA v1.6.2"); log("Connected to Cloud MCP Relay!", "ok"); };
+    ws.onopen = function () { setStatus(true, "OTA v1.6.3"); log("Connected to Cloud MCP Relay!", "ok"); };
     ws.onmessage = async function (ev) {
       var msg;
       try { msg = JSON.parse(ev.data); } catch (_e) { return; }

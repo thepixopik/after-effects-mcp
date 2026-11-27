@@ -33,14 +33,12 @@ public static class PxRecGhost {
   [DllImport("user32.dll")] public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
-  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
-  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
   [DllImport("user32.dll")] public static extern bool GetLayeredWindowAttributes(IntPtr hwnd, out uint crKey, out byte bAlpha, out uint dwFlags);
 
-  public static List<IntPtr> FindDimmerWindows(int minW, int minH, out byte detectedAlpha) {
-    var list = new List<IntPtr>();
+  public static List<uint> FindExternalDimmerPids(int minW, int minH, out byte detectedAlpha) {
+    var pids = new List<uint>();
     byte maxAlpha = 0;
     EnumWindows((hWnd, lParam) => {
       if (!IsWindowVisible(hWnd)) return true;
@@ -54,20 +52,20 @@ public static class PxRecGhost {
       try {
         var proc = Process.GetProcessById((int)pid);
         string pn = (proc.ProcessName ?? "").ToLowerInvariant();
-        if (pn.Contains("dimscreen") || pn.Contains("dimmer") || pn.Contains("pangobright") || pn.Contains("careueyes")) {
+        if (pn.Contains("dimscreen") || pn.Contains("dimmer") || pn.Contains("pangobright")) {
           uint cr; byte alpha = 128; uint flags = 0;
           if (GetLayeredWindowAttributes(hWnd, out cr, out alpha, out flags)) {
             if (alpha > maxAlpha) maxAlpha = alpha;
           } else if (maxAlpha == 0) {
             maxAlpha = 128;
           }
-          list.Add(hWnd);
+          if (!pids.Contains(pid)) pids.Add(pid);
         }
       } catch {}
       return true;
     }, IntPtr.Zero);
     detectedAlpha = maxAlpha;
-    return list;
+    return pids;
   }
 }
 "@ -ErrorAction SilentlyContinue
@@ -101,35 +99,55 @@ $screenW = $bounds.Width
 $screenH = $bounds.Height
 
 # ============================================================================
-# AUTOMATIC DIMSCREEN GHOST SWAP (Eyes stay dimmed, MP4 records 100% BRIGHT!)
+# ZERO-OVERLAP DIMSCREEN SWAP:
+# Close external DimScreen.exe FIRST -> verify it actually closed -> ONLY THEN
+# apply Ghost Dimmer at the exact same % (NEVER stacks two dimmers!)
 # ============================================================================
 $dimmerAlpha = [byte]0
-$hiddenDimHwnds = [PxRecGhost]::FindDimmerWindows([int]($screenW * 0.6), [int]($screenH * 0.6), [ref]$dimmerAlpha)
+$extDimPids = [PxRecGhost]::FindExternalDimmerPids([int]($screenW * 0.6), [int]($screenH * 0.6), [ref]$dimmerAlpha)
+$relaunchDimExes = New-Object System.Collections.Generic.List[string]
 $ghostDimmer = $null
 
-if ($hiddenDimHwnds -and $hiddenDimHwnds.Count -gt 0 -and $dimmerAlpha -gt 5) {
-  $dimOpacity = [Math]::Max(0.05, [Math]::Min(0.92, [Math]::Round($dimmerAlpha / 255.0, 3)))
+if ($extDimPids -and $extDimPids.Count -gt 0 -and $dimmerAlpha -gt 5) {
+  foreach ($dpid in $extDimPids) {
+    try {
+      $pObj = Get-Process -Id ([int]$dpid) -ErrorAction SilentlyContinue
+      if ($pObj) {
+        $exePath = $pObj.Path
+        if (-not $exePath) {
+          $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$dpid" -ErrorAction SilentlyContinue
+          if ($cim) { $exePath = $cim.ExecutablePath }
+        }
+        Stop-Process -Id ([int]$dpid) -Force -ErrorAction SilentlyContinue
+        if ($exePath -and -not $relaunchDimExes.Contains($exePath)) {
+          $relaunchDimExes.Add($exePath)
+        }
+      }
+    } catch {}
+  }
 
-  $ghostDimmer = New-Object System.Windows.Forms.Form
-  $ghostDimmer.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
-  $ghostDimmer.StartPosition   = [System.Windows.Forms.FormStartPosition]::Manual
-  $ghostDimmer.Bounds          = $bounds
-  $ghostDimmer.TopMost         = $true
-  $ghostDimmer.ShowInTaskbar   = $false
-  $ghostDimmer.BackColor       = [System.Drawing.Color]::Black
-  $ghostDimmer.Opacity         = $dimOpacity
-  $ghostDimmer.Show()
+  Start-Sleep -Milliseconds 140
+  $stillAlpha = [byte]0
+  $remaining = [PxRecGhost]::FindExternalDimmerPids([int]($screenW * 0.6), [int]($screenH * 0.6), [ref]$stillAlpha)
 
-  try {
-    $ex = [PxRecGhost]::GetWindowLong($ghostDimmer.Handle, -20)
-    # WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE (100% click-through!)
-    [void][PxRecGhost]::SetWindowLong($ghostDimmer.Handle, -20, ($ex -bor 0x80000 -bor 0x20 -bor 0x08000000))
-    # ExcludeFromCapture (0x11): 100% invisible to FFmpeg ddagrab/gdigrab!
-    [void][PxRecGhost]::SetWindowDisplayAffinity($ghostDimmer.Handle, 0x00000011)
-  } catch {}
+  # SAFETY GUARANTEE: Only show Ghost Dimmer if external DimScreen actually closed (0% chance of double-darkness!)
+  if (-not $remaining -or $remaining.Count -eq 0) {
+    $dimOpacity = [Math]::Max(0.05, [Math]::Min(0.90, [Math]::Round($dimmerAlpha / 255.0, 3)))
+    $ghostDimmer = New-Object System.Windows.Forms.Form
+    $ghostDimmer.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+    $ghostDimmer.StartPosition   = [System.Windows.Forms.FormStartPosition]::Manual
+    $ghostDimmer.Bounds          = $bounds
+    $ghostDimmer.TopMost         = $true
+    $ghostDimmer.ShowInTaskbar   = $false
+    $ghostDimmer.BackColor       = [System.Drawing.Color]::Black
+    $ghostDimmer.Opacity         = $dimOpacity
+    $ghostDimmer.Show()
 
-  foreach ($dh in $hiddenDimHwnds) {
-    [void][PxRecGhost]::ShowWindow($dh, 0) # Hide real DimScreen so video stays 100% bright!
+    try {
+      $ex = [PxRecGhost]::GetWindowLong($ghostDimmer.Handle, -20)
+      [void][PxRecGhost]::SetWindowLong($ghostDimmer.Handle, -20, ($ex -bor 0x80000 -bor 0x20 -bor 0x08000000))
+      [void][PxRecGhost]::SetWindowDisplayAffinity($ghostDimmer.Handle, 0x00000011)
+    } catch {}
   }
 }
 
@@ -224,13 +242,6 @@ try {
     [System.Windows.Forms.Application]::DoEvents()
     if ($script:stopReq -or (Test-Path -LiteralPath $script:stopSignal)) { break }
 
-    # Keep real DimScreen hidden if it tries to re-assert itself mid-recording
-    if ($hiddenDimHwnds) {
-      foreach ($dh in $hiddenDimHwnds) {
-        if ([PxRecGhost]::IsWindowVisible($dh)) { [void][PxRecGhost]::ShowWindow($dh, 0) }
-      }
-    }
-
     if ($vProc.HasExited) {
       if ($usedDda -and -not $retriedGdi -and $sw.Elapsed.TotalSeconds -lt 3.0) {
         $usedDda = $false
@@ -283,7 +294,7 @@ try {
   }
 
   $payload = @{
-    version      = "1.6.1"
+    version      = "1.6.3"
     fps          = $Fps
     screenWidth  = $screenW
     screenHeight = $screenH
@@ -297,12 +308,12 @@ try {
   [System.IO.File]::WriteAllText($doneSignal, "OK")
 }
 finally {
-  # Seamlessly restore real DimScreen before closing Ghost Dimmer (zero brightness flash!)
-  if ($hiddenDimHwnds) {
-    foreach ($dh in $hiddenDimHwnds) {
-      if ([PxRecGhost]::IsWindow($dh)) { [void][PxRecGhost]::ShowWindow($dh, 8) }
+  foreach ($exe in $relaunchDimExes) {
+    if ($exe -and (Test-Path -LiteralPath $exe)) {
+      try { Start-Process -FilePath $exe | Out-Null } catch {}
     }
   }
+  Start-Sleep -Milliseconds 120
   if ($ghostDimmer) {
     try { $ghostDimmer.Close(); $ghostDimmer.Dispose() } catch {}
   }

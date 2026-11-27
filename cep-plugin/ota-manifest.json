@@ -1,5 +1,5 @@
 {
-  "version": "1.6.2",
+  "version": "1.6.3",
   "repo": "thepixopik/after-effects-mcp",
   "branch": "main",
   "files": [
@@ -11,6 +11,7 @@
     "jsx/pro-studio-rig.jsx",
     "recorder/capture-session.ps1",
     "recorder/ghost-presenter.ps1",
+    "recorder/ghost-dimmer.ps1",
     "recorder/studio-browser.ps1",
     "recorder/install-ffmpeg.ps1"
   ]
