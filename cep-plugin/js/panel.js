@@ -46,8 +46,8 @@
   var wallSelect       = document.getElementById("wallpaperSelect");
   var frameSelect      = document.getElementById("frameStyleSelect");
   var chkAutoRigOnStop = document.getElementById("chkAutoRigOnStop");
+  var chkClickSfx      = document.getElementById("chkClickSfx");
   var chkAutoGhost     = document.getElementById("chkAutoGhost");
-  var chkMotionBlur    = document.getElementById("chkMotionBlur");
 
   function log(msg, level) {
     var row = document.createElement("div");
@@ -67,6 +67,65 @@
       "-NoProfile", "-ExecutionPolicy", "Bypass", "-STA",
       "-EncodedCommand", encoded
     ], Object.assign({ windowsHide: true }, opts || {}));
+  }
+
+  /* Ultra-Fast Node.js Single-Track Tactile Click SFX Synthesizer (Zero AE Layer Bloat!) */
+  function buildSingleClickTrackWav(clicks, durationSec, outWavPath) {
+    if (!clicks || !clicks.length) return null;
+    var sr = 22050;
+    var dur = Math.max(2, (durationSec || 10) + 0.25);
+    var totalSamples = Math.ceil(dur * sr);
+    var pcm = new Int16Array(totalSamples);
+
+    var tplLen = Math.floor(sr * 0.085);
+    var tpl = new Int16Array(tplLen);
+    for (var j = 0; j < tplLen; j++) {
+      var lt = j / sr;
+      var w = (Math.sin(6.283185 * 1550 * lt) * Math.exp(-lt * 210) * 0.62) +
+              (Math.sin(6.283185 * 420 * lt) * Math.exp(-lt * 95) * 0.48);
+      if (lt >= 0.046) {
+        var lt2 = lt - 0.046;
+        w += Math.sin(6.283185 * 1950 * lt2) * Math.exp(-lt2 * 280) * 0.22;
+      }
+      var s = Math.max(-1, Math.min(1, w * 0.85));
+      tpl[j] = Math.round(s * 32767);
+    }
+
+    var lastClickT = -1;
+    var placed = 0;
+    for (var c = 0; c < clicks.length; c++) {
+      var ct = clicks[c].t;
+      if (ct < 0 || ct - lastClickT < 0.06) continue;
+      lastClickT = ct;
+      var idx0 = Math.floor(ct * sr);
+      if (idx0 >= totalSamples) break;
+      var maxJ = Math.min(tplLen, totalSamples - idx0);
+      for (var k = 0; k < maxJ; k++) {
+        var sum = pcm[idx0 + k] + tpl[k];
+        pcm[idx0 + k] = sum > 32767 ? 32767 : (sum < -32768 ? -32768 : sum);
+      }
+      placed++;
+    }
+    if (placed === 0) return null;
+
+    var dataByteLen = pcm.byteLength;
+    var wav = Buffer.alloc(44 + dataByteLen);
+    wav.write("RIFF", 0);
+    wav.writeUInt32LE(36 + dataByteLen, 4);
+    wav.write("WAVE", 8);
+    wav.write("fmt ", 12);
+    wav.writeUInt32LE(16, 16);
+    wav.writeUInt16LE(1, 20);
+    wav.writeUInt16LE(1, 22);
+    wav.writeUInt32LE(sr, 24);
+    wav.writeUInt32LE(sr * 2, 28);
+    wav.writeUInt16LE(2, 32);
+    wav.writeUInt16LE(16, 34);
+    wav.write("data", 36);
+    wav.writeUInt32LE(dataByteLen, 40);
+    Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).copy(wav, 44);
+    fs.writeFileSync(outWavPath, wav);
+    return outWavPath;
   }
 
   var ghostBarProc = null;
@@ -122,8 +181,8 @@
 
   loadExtendScripts(function (res) {
     if (String(res).indexOf("OK") === 0) {
-      quickBanner.textContent = "v1.5 Turbo • Instant Zero-Hang Rig + TTS Ready";
-      log("Turbo v1.5 engine ready (Batch Keyframes + Zero Audio Bloat!)", "ok");
+      quickBanner.textContent = "v1.5.2 Turbo • Instant Rig + Crisp Click SFX + TTS Ready";
+      log("Turbo v1.5.2 ready (Batch Keyframes + Single-Track Click SFX!)", "ok");
     } else {
       log("Engine init: " + res, "err");
     }
@@ -132,7 +191,6 @@
   if (modeSelect) {
     modeSelect.onchange = function () {
       var isYT = (modeSelect.value === "youtube_tutorial");
-      chkMotionBlur.checked = false;
       if (isYT) {
         wallSelect.value = "dark_carbon";
         frameSelect.value = "minimal_rounded";
@@ -175,7 +233,6 @@
     });
   };
 
-  /* Smart Deadzone + Strictly-Ascending Trajectory Filter (75% fewer keyframes, zero jitter!) */
   function simplifyTrajectoryTurbo(samples, minStepSec) {
     if (!samples || !samples.length) return [];
     var step = minStepSec || 0.055;
@@ -239,15 +296,19 @@
       autoZoom: document.getElementById("chkAutoZoom").checked,
       vectorCursor: document.getElementById("chkVectorCursor").checked,
       clickRipples: document.getElementById("chkRipples").checked,
-      motionBlur: chkMotionBlur.checked,
+      clickSfx: chkClickSfx ? chkClickSfx.checked : true,
+      motionBlur: false,
       cursorScale: isYT ? 140 : 155
     };
   }
 
-  /* Write pre-digested rig_fast.json to disk so ExtendScript never decodes giant Base64 strings! */
   async function autoRigBundle(bundle, overrides) {
     var t0 = Date.now();
     var motion = null;
+    var clickTrackPath = null;
+    var prefs = Object.assign({}, currentStudioPrefs(), overrides || {});
+    var sessFolder = bundle.dir || path.dirname(bundle.videoPath) || os.tmpdir();
+
     if (bundle.motionPath && fs.existsSync(bundle.motionPath)) {
       try {
         var raw = fs.readFileSync(bundle.motionPath, "utf8").replace(/^\uFEFF/, "");
@@ -256,18 +317,28 @@
         var step = dur > 240 ? 0.08 : (dur > 90 ? 0.065 : 0.05);
         motion.cursorKeys = simplifyTrajectoryTurbo(motion.samples || [], step);
         delete motion.samples;
+
+        if (prefs.clickSfx !== false && motion.clicks && motion.clicks.length > 0) {
+          var wavOut = path.join(sessFolder, "clicks_sfx_track.wav");
+          var built = buildSingleClickTrackWav(motion.clicks, dur, wavOut);
+          if (built) clickTrackPath = built.replace(/\\/g, "/");
+        }
       } catch (e) { log("Telemetry parse warning: " + e.message, "err"); }
     }
 
-    var fullPayload = Object.assign({ videoPath: bundle.videoPath.replace(/\\/g, "/"), motion: motion }, currentStudioPrefs(), overrides || {});
-    var fastJsonPath = path.join(bundle.dir || os.tmpdir(), "rig_fast.json");
+    var fullPayload = Object.assign({
+      videoPath: bundle.videoPath.replace(/\\/g, "/"),
+      clickTrackPath: clickTrackPath,
+      motion: motion
+    }, prefs);
+    var fastJsonPath = path.join(sessFolder, "rig_fast.json");
     fs.writeFileSync(fastJsonPath, JSON.stringify(fullPayload), "utf8");
 
     log("Turbo-rigging timeline...", "info");
     var res = await evalJSX("import_and_autorig_recording", { payloadFile: fastJsonPath.replace(/\\/g, "/") });
     var elapsed = ((Date.now() - t0) / 1000).toFixed(2);
     if (res && res.ok) {
-      log("Rigged in " + elapsed + "s: " + res.compName + " (" + (res.cursorKeyframes || 0) + " keys)", "ok");
+      log("Rigged in " + elapsed + "s: " + res.compName + (res.clickSfxAdded ? " + Click SFX!" : ""), "ok");
     } else {
       log("Auto-rig error: " + JSON.stringify(res), "err");
     }
@@ -448,7 +519,7 @@
     var url = (wsInput.value || "").trim();
     setStatus(false, "Connecting...");
     ws = new WebSocket(url);
-    ws.onopen = function () { setStatus(true, "Turbo v1.5"); log("Connected to Cloud MCP Relay!", "ok"); };
+    ws.onopen = function () { setStatus(true, "Turbo v1.5.2"); log("Connected to Cloud MCP Relay!", "ok"); };
     ws.onmessage = async function (ev) {
       var msg;
       try { msg = JSON.parse(ev.data); } catch (_e) { return; }

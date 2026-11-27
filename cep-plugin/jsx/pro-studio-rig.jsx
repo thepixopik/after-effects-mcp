@@ -26,7 +26,6 @@
     return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
   }
 
-  /* Native C++ Batch Keyframe Setter: 50x faster than setValueAtTime loops! */
   function setBatchKeys(prop, pairs, maxDur) {
     if (!prop || !pairs || pairs.length === 0) return 0;
     pairs.sort(function (a, b) { return a.t - b.t; });
@@ -198,7 +197,6 @@
     return cur;
   }
 
-  /* 1 Single Reusable Ripple Layer animated purely via Layer Transform (NEVER invalidates!) */
   function createSingleMasterRipple(comp, camNull, clicks, toCompFn, dur) {
     if (!clicks || clicks.length === 0) return;
     var filtered = [];
@@ -351,7 +349,7 @@
     var isTutorial = (args.editMode === "youtube_tutorial");
     var camStyle = args.cameraMode || "smooth_travel";
 
-    app.beginUndoGroup("Pixopik Turbo Studio Rig v1.5.1");
+    app.beginUndoGroup("Pixopik Turbo Studio Rig v1.5.2");
     try {
       var footage = app.project.importFile(new ImportOptions(vFile));
       var preset = args.aspectPreset || "youtube_16_9";
@@ -431,6 +429,22 @@
         }
       }
 
+      /* 1-Layer Pre-Mixed Tactile Mouse Click SFX Track (-2.5 dB Balanced Level, Zero Hang!) */
+      var clickSfxAdded = false;
+      if (args.clickTrackPath) {
+        var cf = new File(args.clickTrackPath);
+        if (cf.exists) {
+          var cItem = app.project.importFile(new ImportOptions(cf));
+          var cLyr = comp.layers.add(cItem);
+          cLyr.name = "07_Mouse_Click_SFX";
+          cLyr.startTime = 0;
+          try {
+            cLyr.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([-2.5, -2.5]);
+          } catch (_eAud) {}
+          clickSfxAdded = true;
+        }
+      }
+
       var dirAdj = null;
       if (!isTutorial) {
         dirAdj = comp.layers.addSolid([1, 1, 1], "06_Cinema_3D_Director", compW, compH, 1);
@@ -479,7 +493,7 @@
       }
 
       comp.openInViewer();
-      return { ok: true, compName: comp.name, cameraMode: camStyle, cursorKeyframes: curCount, autoZoomClusters: zoomClusters };
+      return { ok: true, compName: comp.name, cameraMode: camStyle, cursorKeyframes: curCount, autoZoomClusters: zoomClusters, clickSfxAdded: clickSfxAdded };
     } finally {
       app.endUndoGroup();
     }
