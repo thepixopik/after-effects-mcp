@@ -9,6 +9,16 @@
     clean_daylight: ["#C7D2FE", "#BAE6FD", "#F1F5F9", "#E0E7FF"]
   };
 
+  var GIMBAL_EXPR = [
+    "var w = [0.05, 0.09, 0.12, 0.15, 0.18, 0.15, 0.12, 0.09, 0.05];",
+    "var acc = [0, 0];",
+    "for (var i = 0; i < 9; i++) {",
+    "  var tt = Math.max(0, Math.min(thisComp.duration - 0.01, time + (i - 4) * 0.11));",
+    "  acc += valueAtTime(tt) * w[i];",
+    "}",
+    "acc;"
+  ].join("\n");
+
   function u16(n) { return String.fromCharCode(n & 255, (n >> 8) & 255); }
   function u32(n) { return String.fromCharCode(n & 255, (n >> 8) & 255, (n >> 16) & 255, (n >> 24) & 255); }
 
@@ -75,8 +85,8 @@
     return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
   }
 
-  function easeProp(prop, inf) {
-    var influence = inf || 80;
+  function easeProp(prop, inf, smoothSpatial) {
+    var influence = inf || 85;
     for (var k = 1; k <= prop.numKeys; k++) {
       var dims = 1;
       try { var vt = prop.keyValue(k); if (vt instanceof Array) dims = vt.length; } catch (_e) {}
@@ -84,6 +94,9 @@
       for (var d = 0; d < dims; d++) { eIn.push(new KeyframeEase(0, influence)); eOut.push(new KeyframeEase(0, influence)); }
       try { prop.setTemporalEaseAtKey(k, eIn, eOut); } catch (_e2) {
         try { prop.setTemporalEaseAtKey(k, [new KeyframeEase(0, influence)], [new KeyframeEase(0, influence)]); } catch (_e3) {}
+      }
+      if (smoothSpatial) {
+        try { prop.setSpatialContinuousAtKey(k, true); prop.setSpatialAutoBezierAtKey(k, true); } catch (_es) {}
       }
     }
   }
@@ -235,7 +248,7 @@
     var sz = g.addProperty("ADBE Vector Shape - Ellipse").property("ADBE Vector Ellipse Size");
     sz.setValueAtTime(t, [10, 10]);
     sz.setValueAtTime(t + 0.44, [90, 90]);
-    easeProp(sz, 75);
+    easeProp(sz, 75, false);
     var st = g.addProperty("ADBE Vector Graphic - Stroke");
     st.property("ADBE Vector Stroke Color").setValue([0.39, 0.40, 0.95]);
     st.property("ADBE Vector Stroke Width").setValueAtTime(t, 5);
@@ -245,12 +258,82 @@
     op.setValueAtTime(t + 0.44, 0);
   }
 
+  function buildSmoothTravelKeyframes(compW, compH, dur, camPos, camScl, swivel, tilt, curLayer, travelZoom, isTutorial) {
+    var cx = compW / 2, cy = compH / 2, z = travelZoom / 100;
+    function clampPt(px, py) {
+      var tx = cx - z * (px - cx), ty = cy - z * (py - cy);
+      var maxPX = (compW * (z - 1)) * 0.46, maxPY = (compH * (z - 1)) * 0.46;
+      return [Math.max(cx - maxPX, Math.min(cx + maxPX, tx)), Math.max(cy - maxPY, Math.min(cy + maxPY, ty))];
+    }
+
+    var cPos = curLayer ? curLayer.property("ADBE Transform Group").property("ADBE Position") : null;
+    var stops = [];
+    if (cPos && cPos.numKeys > 0) {
+      var lastPt = null;
+      for (var t = 0.95; t < dur - 1.1; t += 0.95) {
+        var p = cPos.valueAtTime(t, false);
+        if (!lastPt || Math.sqrt((p[0]-lastPt[0])*(p[0]-lastPt[0]) + (p[1]-lastPt[1])*(p[1]-lastPt[1])) > 115) {
+          stops.push({ t: t, x: p[0], y: p[1] });
+          lastPt = p;
+        }
+      }
+    }
+
+    camPos.setValueAtTime(0, [cx, cy]);
+    camScl.setValueAtTime(0, [100, 100]);
+
+    if (stops.length > 0) {
+      var firstT = Math.max(1.25, stops[0].t);
+      var startEase = Math.max(0.05, firstT - 1.2);
+      camPos.setValueAtTime(startEase, [cx, cy]);
+      camScl.setValueAtTime(startEase, [100, 100]);
+
+      for (var i = 0; i < stops.length; i++) {
+        var s = stops[i];
+        /* Only gently ease out if user left mouse completely untouched for > 8.5s */
+        if (i > 0 && (s.t - stops[i - 1].t) > 8.5) {
+          camPos.setValueAtTime(stops[i - 1].t + 1.2, [cx, cy]);
+          camScl.setValueAtTime(stops[i - 1].t + 1.2, [100, 100]);
+          camPos.setValueAtTime(s.t - 1.2, [cx, cy]);
+          camScl.setValueAtTime(s.t - 1.2, [100, 100]);
+        }
+        var ct = clampPt(s.x, s.y);
+        camPos.setValueAtTime(s.t, ct);
+        camScl.setValueAtTime(s.t, [travelZoom, travelZoom]);
+        if (swivel && tilt && !isTutorial) {
+          swivel.setValueAtTime(s.t, ((s.x - cx) / cx) * 3.0);
+          tilt.setValueAtTime(s.t, -((s.y - cy) / cy) * 1.9);
+        }
+      }
+
+      var endS = stops[stops.length - 1];
+      var holdEnd = Math.min(dur - 1.25, endS.t + 0.8);
+      if (holdEnd > endS.t) {
+        camPos.setValueAtTime(holdEnd, clampPt(endS.x, endS.y));
+        camScl.setValueAtTime(holdEnd, [travelZoom, travelZoom]);
+      }
+      var outT = Math.min(dur - 0.05, Math.max(holdEnd + 1.15, dur - 0.12));
+      camPos.setValueAtTime(outT, [cx, cy]);
+      camScl.setValueAtTime(outT, [100, 100]);
+      if (swivel && tilt) { swivel.setValueAtTime(outT, 0); tilt.setValueAtTime(outT, 0); }
+    }
+
+    easeProp(camPos, 90, true);
+    easeProp(camScl, 90, false);
+    if (swivel) easeProp(swivel, 85, false);
+    if (tilt) easeProp(tilt, 85, false);
+    camPos.expression = GIMBAL_EXPR;
+    camScl.expression = GIMBAL_EXPR;
+    return stops.length;
+  }
+
   function proAutoRig(args) {
     var vFile = new File(args.videoPath);
     if (!vFile.exists) throw new Error("Video not found: " + args.videoPath);
 
     var isTutorial = (args.editMode === "youtube_tutorial");
-    app.beginUndoGroup("Pixopik Studio Rig (" + (isTutorial ? "YouTube Tutorial" : "SaaS Promo") + ")");
+    var camStyle = args.cameraMode || "smooth_travel";
+    app.beginUndoGroup("Pixopik Studio Rig v1.2");
     try {
       var footage = app.project.importFile(new ImportOptions(vFile));
       var preset = args.aspectPreset || "youtube_16_9";
@@ -262,7 +345,7 @@
       var dur = Math.max(2, footage.duration || 10);
       var prefix = isTutorial ? "YT_Tutorial_" : "AgencyStudio_";
       var comp = app.project.items.addComp((prefix + vFile.name.replace(/\.[^\.]+$/, "")).slice(0, 58), compW, compH, 1, dur, 60);
-      comp.resolutionFactor = isTutorial ? [2, 2] : [1, 1]; /* Half res default in long YT tutorials to save Disk Cache! */
+      comp.resolutionFactor = isTutorial ? [2, 2] : [1, 1];
       var useBlur = (args.motionBlur !== false) && !isTutorial;
       comp.motionBlur = useBlur;
 
@@ -290,8 +373,7 @@
       vidLayer.property("ADBE Transform Group").property("ADBE Scale").setValue([fitScale, fitScale]);
       vidLayer.parent = camNull;
 
-      var winW = footage.width * (fitScale / 100);
-      var winH = footage.height * (fitScale / 100);
+      var winW = footage.width * (fitScale / 100), winH = footage.height * (fitScale / 100);
       var vidCenterY = addWindowChrome(comp, camNull, vidLayer, winW, winH, frameStyle, useBlur);
       var winLeft = cx - (winW / 2), winTop = vidCenterY - (winH / 2);
 
@@ -301,9 +383,8 @@
       function toComp(sx, sy) { return [winLeft + (sx / srcW) * winW, winTop + (sy / srcH) * winH]; }
 
       var clicks = (motion && motion.clicks) ? motion.clicks : [];
-      var curCount = 0;
+      var curCount = 0, curLayer = null;
 
-      /* Keep main timeline super clean by grouping ripples inside a single precomp! */
       var ripComp = null;
       if (args.clickRipples !== false && clicks.length > 0) {
         ripComp = app.project.items.addComp("03_Ripples_" + comp.name.slice(-6), compW, compH, 1, dur, 60);
@@ -314,11 +395,11 @@
       }
 
       if (motion && args.vectorCursor !== false && motion.cursorKeys && motion.cursorKeys.length > 0) {
-        var baseS = args.cursorScale || (isTutorial ? 140 : 160);
-        var cur = createAgencyCursor(comp, baseS, useBlur);
-        cur.parent = camNull;
-        var cPos = cur.property("ADBE Transform Group").property("ADBE Position");
-        var cScl = cur.property("ADBE Transform Group").property("ADBE Scale");
+        var baseS = args.cursorScale || (isTutorial ? 140 : 158);
+        curLayer = createAgencyCursor(comp, baseS, useBlur);
+        curLayer.parent = camNull;
+        var cPos = curLayer.property("ADBE Transform Group").property("ADBE Position");
+        var cScl = curLayer.property("ADBE Transform Group").property("ADBE Scale");
         for (var k = 0; k < motion.cursorKeys.length; k++) {
           var s = motion.cursorKeys[k];
           cPos.setValueAtTime(s.t, toComp(s.x, s.y));
@@ -332,7 +413,7 @@
           cScl.setValueAtTime(clk.t + 0.14, [baseS, baseS]);
           if (ripComp) addRippleInto(ripComp, null, clk.t, cp[0], cp[1]);
         }
-        cur.moveToBeginning();
+        curLayer.moveToBeginning();
       }
 
       var swivel = null, tilt = null;
@@ -347,55 +428,41 @@
       }
 
       var camPos = camTr.property("ADBE Position"), camScl = camTr.property("ADBE Scale");
-      if (!isTutorial) {
-        camPos.setValueAtTime(0, [cx, cy + 36]); camScl.setValueAtTime(0, [85, 85]);
-        camPos.setValueAtTime(0.95, [cx, cy]);   camScl.setValueAtTime(0.95, [100, 100]);
-        if (swivel && tilt) { swivel.setValueAtTime(0, -8); tilt.setValueAtTime(0, 6); swivel.setValueAtTime(0.95, 0); tilt.setValueAtTime(0.95, 0); }
-      }
+      var zoomClusters = 0;
 
-      var zoomPct = args.zoomPercent || (isTutorial ? 145 : (preset === "shorts_9_16" ? 215 : 178));
-      var z = zoomPct / 100, zoomClusters = 0;
-
-      if (args.autoZoom !== false && clicks.length > 0) {
-        var idx = 0;
-        var minGapBetweenZooms = isTutorial ? 2.6 : 1.8;
-        while (idx < clicks.length) {
-          if (clicks[idx].t < 1.05) { idx++; continue; }
-          var enterT = Math.max(1.0, clicks[idx].t - 0.5);
-          camPos.setValueAtTime(enterT, [cx, cy]); camScl.setValueAtTime(enterT, [100, 100]);
-          if (swivel && tilt) { swivel.setValueAtTime(enterT, 0); tilt.setValueAtTime(enterT, 0); }
-          zoomClusters++;
-
-          var lastHold = clicks[idx].t;
+      if (args.autoZoom !== false) {
+        if (camStyle === "smooth_travel" && curLayer) {
+          var tZoom = args.zoomPercent || (isTutorial ? 142 : (preset === "shorts_9_16" ? 195 : 154));
+          zoomClusters = buildSmoothTravelKeyframes(compW, compH, dur, camPos, camScl, swivel, tilt, curLayer, tZoom, isTutorial);
+        } else if (clicks.length > 0) {
+          var zoomPct = args.zoomPercent || (isTutorial ? 145 : (preset === "shorts_9_16" ? 215 : 176));
+          var z = zoomPct / 100, idx = 0, minGap = isTutorial ? 2.6 : 1.8;
           while (idx < clicks.length) {
-            var cn = clicks[idx];
-            var pt = toComp(cn.x, cn.y);
-            var zx = cx - z * (pt[0] - cx), zy = cy - z * (pt[1] - cy);
-            var maxPX = (compW * (z - 1)) / 2, maxPY = (compH * (z - 1)) / 2;
-            zx = Math.max(cx - maxPX, Math.min(cx + maxPX, zx));
-            zy = Math.max(cy - maxPY, Math.min(cy + maxPY, zy));
-
-            var holdT = cn.t + (isTutorial ? 1.15 : 0.85);
-            camPos.setValueAtTime(cn.t, [zx, zy]);  camScl.setValueAtTime(cn.t, [zoomPct, zoomPct]);
-            camPos.setValueAtTime(holdT, [zx, zy]); camScl.setValueAtTime(holdT, [zoomPct, zoomPct]);
-            if (swivel && tilt) {
-              var swA = ((pt[0] - cx) / cx) * 5.0, tlA = -((pt[1] - cy) / cy) * 3.2;
-              swivel.setValueAtTime(cn.t, swA); tilt.setValueAtTime(cn.t, tlA);
-              swivel.setValueAtTime(holdT, swA * 0.5); tilt.setValueAtTime(holdT, tlA * 0.5);
+            if (clicks[idx].t < 1.05) { idx++; continue; }
+            var enterT = Math.max(1.0, clicks[idx].t - 0.5);
+            camPos.setValueAtTime(enterT, [cx, cy]); camScl.setValueAtTime(enterT, [100, 100]);
+            zoomClusters++;
+            var lastHold = clicks[idx].t;
+            while (idx < clicks.length) {
+              var cn = clicks[idx], pt = toComp(cn.x, cn.y);
+              var zx = cx - z * (pt[0] - cx), zy = cy - z * (pt[1] - cy);
+              var maxPX = (compW * (z - 1)) / 2, maxPY = (compH * (z - 1)) / 2;
+              zx = Math.max(cx - maxPX, Math.min(cx + maxPX, zx));
+              zy = Math.max(cy - maxPY, Math.min(cy + maxPY, zy));
+              var holdT = cn.t + (isTutorial ? 1.15 : 0.85);
+              camPos.setValueAtTime(cn.t, [zx, zy]);  camScl.setValueAtTime(cn.t, [zoomPct, zoomPct]);
+              camPos.setValueAtTime(holdT, [zx, zy]); camScl.setValueAtTime(holdT, [zoomPct, zoomPct]);
+              lastHold = holdT;
+              if (idx + 1 < clicks.length && (clicks[idx + 1].t - holdT) < minGap) idx++;
+              else { idx++; break; }
             }
-            lastHold = holdT;
-            if (idx + 1 < clicks.length && (clicks[idx + 1].t - holdT) < minGapBetweenZooms) idx++;
-            else { idx++; break; }
+            var exitT = Math.min(dur - 0.1, lastHold + 0.55);
+            camPos.setValueAtTime(exitT, [cx, cy]); camScl.setValueAtTime(exitT, [100, 100]);
           }
-          var exitT = Math.min(dur - 0.1, lastHold + 0.55);
-          camPos.setValueAtTime(exitT, [cx, cy]); camScl.setValueAtTime(exitT, [100, 100]);
-          if (swivel && tilt) { swivel.setValueAtTime(exitT, 0); tilt.setValueAtTime(exitT, 0); }
+          easeProp(camPos, 82, false); easeProp(camScl, 82, false);
         }
       }
-      easeProp(camPos, 82); easeProp(camScl, 82);
-      if (swivel) easeProp(swivel, 78); if (tilt) easeProp(tilt, 78);
 
-      /* Audio Mix: Duck click lower (-8dB) when voiceover/tutorial is active! */
       try {
         var tmp = Folder.temp.fsName.replace(/\\/g, "/");
         var clickItem = app.project.importFile(new ImportOptions(ensureBalancedClickWav(tmp + "/px_balanced_click_v3.wav")));
@@ -408,17 +475,10 @@
         var clickDb = (isTutorial || footage.hasAudio) ? -7.5 : -2.5;
         try { clickLyr.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([clickDb, clickDb]); } catch (_ea1) {}
 
-        if (!isTutorial) {
+        if (!isTutorial && camStyle !== "smooth_travel") {
           var whooshItem = app.project.importFile(new ImportOptions(ensureVelvetWhooshWav(tmp + "/px_velvet_whoosh_v3.wav")));
           var wComp = app.project.items.addComp("07B_Soft_Whoosh_SFX_" + comp.name.slice(-5), 100, 100, 1, dur, 60);
           wComp.layers.add(whooshItem).startTime = 0.06;
-          var lastW = 0.5;
-          for (var wc = 0; wc < clicks.length; wc++) {
-            if (clicks[wc].t > 1.1 && (clicks[wc].t - lastW) >= 3.2) {
-              wComp.layers.add(whooshItem).startTime = Math.max(0, clicks[wc].t - 0.32);
-              lastW = clicks[wc].t;
-            }
-          }
           var wLyr = comp.layers.add(wComp);
           wLyr.name = "07B_Soft_Whoosh_SFX"; wLyr.enabled = false; wLyr.audioEnabled = true;
           try { wLyr.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([-4, -4]); } catch (_ea2) {}
@@ -426,10 +486,48 @@
       } catch (_sfxErr) {}
 
       comp.openInViewer();
-      return { ok: true, compName: comp.name, mode: isTutorial ? "youtube_tutorial" : "saas_promo", cursorKeyframes: curCount, autoZoomClusters: zoomClusters };
+      return { ok: true, compName: comp.name, cameraMode: camStyle, cursorKeyframes: curCount, autoZoomClusters: zoomClusters };
     } finally {
       app.endUndoGroup();
     }
+  }
+
+  function applySmoothTravelToActive() {
+    var comp = app.project ? app.project.activeItem : null;
+    if (!comp || !(comp instanceof CompItem)) throw new Error("Open a studio composition first!");
+    var camNull = null, curLayer = null, dirAdj = null;
+    for (var l = 1; l <= comp.numLayers; l++) {
+      var nm = comp.layer(l).name;
+      if (nm === "05_Smart_Camera_Rig") camNull = comp.layer(l);
+      if (nm === "04_Vector_Cursor") curLayer = comp.layer(l);
+      if (nm === "06_Cinema_3D_Director") dirAdj = comp.layer(l);
+    }
+    if (!camNull || !curLayer) throw new Error("05_Smart_Camera_Rig / 04_Vector_Cursor not found in active comp.");
+
+    app.beginUndoGroup("Apply Smooth Travel Glide");
+    try {
+      var camTr = camNull.property("ADBE Transform Group");
+      var camPos = camTr.property("ADBE Position"), camScl = camTr.property("ADBE Scale");
+      while (camPos.numKeys > 0) camPos.removeKey(camPos.numKeys);
+      while (camScl.numKeys > 0) camScl.removeKey(camScl.numKeys);
+      camPos.expression = ""; camScl.expression = "";
+
+      var swivel = null, tilt = null;
+      if (dirAdj) {
+        try {
+          var b3d = dirAdj.property("ADBE Effect Parade").property("ADBE Basic 3D");
+          if (b3d) {
+            swivel = b3d.property(1); tilt = b3d.property(2);
+            while (swivel.numKeys > 0) swivel.removeKey(swivel.numKeys);
+            while (tilt.numKeys > 0) tilt.removeKey(tilt.numKeys);
+            swivel.setValue(0); tilt.setValue(0);
+          }
+        } catch (_e3) {}
+      }
+      var isYT = (comp.name.indexOf("YT_Tutorial_") === 0);
+      var wp = buildSmoothTravelKeyframes(comp.width, comp.height, comp.duration, camPos, camScl, swivel, tilt, curLayer, isYT ? 142 : 154, isYT);
+      return { ok: true, compName: comp.name, travelWaypoints: wp };
+    } finally { app.endUndoGroup(); }
   }
 
   function addYouTubeSubscribePill() {
@@ -439,8 +537,7 @@
     try {
       var t0 = comp.time, cx = comp.width / 2, yPos = comp.height - 115;
       var box = comp.layers.addShape();
-      box.name = "YT_Subscribe_Pill";
-      box.moveToBeginning();
+      box.name = "YT_Subscribe_Pill"; box.moveToBeginning();
       box.inPoint = t0; box.outPoint = Math.min(comp.duration, t0 + 3.4);
       var sub = box.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group").property("ADBE Vectors Group");
       var r = sub.addProperty("ADBE Vector Shape - Rect");
@@ -455,16 +552,14 @@
       sc.setValueAtTime(t0 + 0.32, [106, 106]);
       sc.setValueAtTime(t0 + 0.45, [100, 100]);
       sc.setValueAtTime(t0 + 1.4, [100, 100]);
-      sc.setValueAtTime(t0 + 1.5, [90, 90]); /* Click squish! */
+      sc.setValueAtTime(t0 + 1.5, [90, 90]);
       sc.setValueAtTime(t0 + 1.65, [100, 100]);
       sc.setValueAtTime(t0 + 3.0, [100, 100]);
       sc.setValueAtTime(t0 + 3.35, [0, 0]);
-      easeProp(sc, 78);
+      easeProp(sc, 78, false);
 
       var txt = comp.layers.addText("SUBSCRIBE  •  🔔");
-      txt.name = "YT_Subscribe_Label";
-      txt.parent = box;
-      txt.moveBefore(box);
+      txt.name = "YT_Subscribe_Label"; txt.parent = box; txt.moveBefore(box);
       txt.inPoint = box.inPoint; txt.outPoint = box.outPoint;
       var td = txt.property("ADBE Text Properties").property("ADBE Text Document");
       var d = td.value; d.fontSize = 26; d.fillColor = [1, 1, 1]; d.tracking = 80;
@@ -482,8 +577,7 @@
       var t0 = comp.time;
       var label = (args && args.title) ? args.title : "STEP 01  •  Getting Started";
       var bar = comp.layers.addShape();
-      bar.name = "YT_Chapter_Card";
-      bar.moveToBeginning();
+      bar.name = "YT_Chapter_Card"; bar.moveToBeginning();
       bar.inPoint = t0; bar.outPoint = Math.min(comp.duration, t0 + 3.8);
       var sub = bar.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group").property("ADBE Vectors Group");
       var r = sub.addProperty("ADBE Vector Shape - Rect");
@@ -499,12 +593,10 @@
       pos.setValueAtTime(t0 + 0.4, [290, comp.height - 110]);
       pos.setValueAtTime(t0 + 3.3, [290, comp.height - 110]);
       pos.setValueAtTime(t0 + 3.75, [-260, comp.height - 110]);
-      easeProp(pos, 82);
+      easeProp(pos, 82, false);
 
       var txt = comp.layers.addText(label);
-      txt.name = "YT_Chapter_Text";
-      txt.parent = bar;
-      txt.moveBefore(bar);
+      txt.name = "YT_Chapter_Text"; txt.parent = bar; txt.moveBefore(bar);
       txt.inPoint = bar.inPoint; txt.outPoint = bar.outPoint;
       var td = txt.property("ADBE Text Properties").property("ADBE Text Document");
       var d = td.value; d.fontSize = 24; d.fillColor = [1, 1, 1];
@@ -537,9 +629,10 @@
   }
 
   PixopikAE.dispatch = function (action, b64Args) {
-    if (action === "import_and_autorig_recording" || action === "add_youtube_subscribe" || action === "add_youtube_chapter") {
+    if (action === "import_and_autorig_recording" || action === "apply_smooth_travel" || action === "add_youtube_subscribe" || action === "add_youtube_chapter") {
       try {
         var parsed = b64Args ? eval("(" + decB64(b64Args) + ")") : {};
+        if (action === "apply_smooth_travel") return toJson(applySmoothTravelToActive());
         if (action === "add_youtube_subscribe") return toJson(addYouTubeSubscribePill());
         if (action === "add_youtube_chapter") return toJson(addYouTubeChapterCard(parsed));
         return toJson(proAutoRig(parsed));
