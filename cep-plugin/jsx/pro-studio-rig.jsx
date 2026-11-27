@@ -28,7 +28,7 @@
 
   /* Native C++ Batch Keyframe Setter: 50x faster than setValueAtTime loops! */
   function setBatchKeys(prop, pairs, maxDur) {
-    if (!pairs || pairs.length === 0) return 0;
+    if (!prop || !pairs || pairs.length === 0) return 0;
     pairs.sort(function (a, b) { return a.t - b.t; });
     var ts = [], vs = [], lastT = -999;
     var limit = (maxDur && maxDur > 0.1) ? (maxDur - 0.005) : 99999;
@@ -50,9 +50,10 @@
   }
 
   function easeProp(prop, inf, smoothSpatial) {
+    if (!prop) return;
     var influence = inf || 85;
     var n = prop.numKeys;
-    if (n === 0 || n > 120) return; /* Only ease sparse camera/UI keys, never heavy cursor tracks! */
+    if (n === 0 || n > 120) return;
     var dims = 1;
     try { var vt = prop.keyValue(1); if (vt instanceof Array) dims = vt.length; } catch (_e) {}
     var eIn = [], eOut = [];
@@ -88,6 +89,10 @@
     return bg;
   }
 
+  function vecSubGroup(shapeLayer, groupIdx) {
+    return shapeLayer.property("ADBE Root Vectors Group").property(groupIdx || 1).property("ADBE Vectors Group");
+  }
+
   function addWindowChrome(comp, camNull, vidLayer, winW, winH, style, useBlur) {
     var cx = comp.width / 2, cy = comp.height / 2;
     var headerH = (style === "macos_glass") ? 34 : 0;
@@ -102,17 +107,20 @@
     card.parent = camNull;
     card.moveAfter(vidLayer);
     card.property("ADBE Transform Group").property("ADBE Position").setValue([cx, cy]);
-    var sub = card.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group").property("ADBE Vectors Group");
-    var rect = sub.addProperty("ADBE Vector Shape - Rect");
-    rect.property("ADBE Vector Rect Size").setValue([cardW, cardH]);
-    rect.property("ADBE Vector Rect Roundness").setValue(radius + 2);
-    sub.addProperty("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Color").setValue([0.09, 0.11, 0.16]);
+
+    card.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group");
+    var rShape = vecSubGroup(card, 1).addProperty("ADBE Vector Shape - Rect");
+    rShape.property("ADBE Vector Rect Size").setValue([cardW, cardH]);
+    rShape.property("ADBE Vector Rect Roundness").setValue(radius + 2);
+
+    var rFill = vecSubGroup(card, 1).addProperty("ADBE Vector Graphic - Fill");
+    rFill.property("ADBE Vector Fill Color").setValue([0.09, 0.11, 0.16]);
 
     if (style !== "sharp_clean") {
-      var st = sub.addProperty("ADBE Vector Graphic - Stroke");
-      st.property("ADBE Vector Stroke Color").setValue([1, 1, 1]);
-      st.property("ADBE Vector Stroke Opacity").setValue(22);
-      st.property("ADBE Vector Stroke Width").setValue(2);
+      var rSt = vecSubGroup(card, 1).addProperty("ADBE Vector Graphic - Stroke");
+      rSt.property("ADBE Vector Stroke Color").setValue([1, 1, 1]);
+      rSt.property("ADBE Vector Stroke Opacity").setValue(22);
+      rSt.property("ADBE Vector Stroke Width").setValue(2);
     }
     try {
       var ds1 = card.property("ADBE Effect Parade").addProperty("ADBE Drop Shadow");
@@ -127,11 +135,13 @@
       matte.parent = camNull;
       matte.moveBefore(vidLayer);
       matte.property("ADBE Transform Group").property("ADBE Position").setValue([cx, vidCenterY]);
-      var mGrp = matte.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group").property("ADBE Vectors Group");
-      var mRect = mGrp.addProperty("ADBE Vector Shape - Rect");
+
+      matte.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group");
+      var mRect = vecSubGroup(matte, 1).addProperty("ADBE Vector Shape - Rect");
       mRect.property("ADBE Vector Rect Size").setValue([winW, winH]);
       mRect.property("ADBE Vector Rect Roundness").setValue(radius);
-      mGrp.addProperty("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Color").setValue([1, 1, 1]);
+      vecSubGroup(matte, 1).addProperty("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Color").setValue([1, 1, 1]);
+
       try {
         if (vidLayer.setTrackMatte) vidLayer.setTrackMatte(matte, TrackMatteType.ALPHA);
         else { matte.enabled = false; vidLayer.trackMatteType = TrackMatteType.ALPHA; }
@@ -145,13 +155,12 @@
       topBar.moveBefore(vidLayer);
       topBar.property("ADBE Transform Group").property("ADBE Position").setValue([cx - (winW / 2) + 22, cy - (cardH / 2) + (headerH / 2) + 2]);
       var dotColors = [[1.0, 0.37, 0.34], [1.0, 0.74, 0.18], [0.15, 0.79, 0.25]];
-      var rootVec = topBar.property("ADBE Root Vectors Group");
       for (var d = 0; d < 3; d++) {
-        var ds = rootVec.addProperty("ADBE Vector Group").property("ADBE Vectors Group");
-        var el = ds.addProperty("ADBE Vector Shape - Ellipse");
+        topBar.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group");
+        var el = vecSubGroup(topBar, d + 1).addProperty("ADBE Vector Shape - Ellipse");
         el.property("ADBE Vector Ellipse Size").setValue([11, 11]);
         el.property("ADBE Vector Ellipse Position").setValue([d * 19, 0]);
-        ds.addProperty("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Color").setValue(dotColors[d]);
+        vecSubGroup(topBar, d + 1).addProperty("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Color").setValue(dotColors[d]);
       }
       if (useBlur) topBar.motionBlur = true;
     }
@@ -163,14 +172,16 @@
     var cur = comp.layers.addShape();
     cur.name = "04_Vector_Cursor";
     cur.moveToBeginning();
-    var g = cur.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group").property("ADBE Vectors Group");
-    var p = g.addProperty("ADBE Vector Shape - Group");
+
+    cur.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group");
+    var p = vecSubGroup(cur, 1).addProperty("ADBE Vector Shape - Group");
     var sh = new Shape();
     sh.vertices = [[0, 0], [0, 26], [6.8, 19.8], [11.6, 29.5], [16.2, 27.2], [11.3, 17.6], [19.5, 17.6]];
     sh.closed = true;
     p.property("ADBE Vector Shape").setValue(sh);
-    g.addProperty("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Color").setValue([0.07, 0.09, 0.14]);
-    var st = g.addProperty("ADBE Vector Graphic - Stroke");
+
+    vecSubGroup(cur, 1).addProperty("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Color").setValue([0.07, 0.09, 0.14]);
+    var st = vecSubGroup(cur, 1).addProperty("ADBE Vector Graphic - Stroke");
     st.property("ADBE Vector Stroke Color").setValue([1, 1, 1]);
     st.property("ADBE Vector Stroke Width").setValue(2.4);
 
@@ -187,7 +198,7 @@
     return cur;
   }
 
-  /* 1 Single Reusable Ripple Layer for ALL Clicks (Zero Layer Bloat, Instant Speed!) */
+  /* 1 Single Reusable Ripple Layer animated purely via Layer Transform (NEVER invalidates!) */
   function createSingleMasterRipple(comp, camNull, clicks, toCompFn, dur) {
     if (!clicks || clicks.length === 0) return;
     var filtered = [];
@@ -203,27 +214,30 @@
     var rip = comp.layers.addShape();
     rip.name = "03_Click_Ripple_FX";
     rip.parent = camNull;
-    var g = rip.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group").property("ADBE Vectors Group");
-    var sz = g.addProperty("ADBE Vector Shape - Ellipse").property("ADBE Vector Ellipse Size");
-    var st = g.addProperty("ADBE Vector Graphic - Stroke");
+
+    rip.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group");
+    var el = vecSubGroup(rip, 1).addProperty("ADBE Vector Shape - Ellipse");
+    el.property("ADBE Vector Ellipse Size").setValue([92, 92]);
+
+    var st = vecSubGroup(rip, 1).addProperty("ADBE Vector Graphic - Stroke");
     st.property("ADBE Vector Stroke Color").setValue([0.39, 0.40, 0.96]);
     st.property("ADBE Vector Stroke Width").setValue(4.2);
 
-    var tr = rip.property("ADBE Transform Group");
+    var tr  = rip.property("ADBE Transform Group");
     var pos = tr.property("ADBE Position");
+    var scl = tr.property("ADBE Scale");
     var op  = tr.property("ADBE Opacity");
     op.setValue(0);
 
-    var posPairs = [], szPairs = [], opPairs = [];
-    opPairs.push({ t: 0, v: 0 });
+    var posPairs = [], sclPairs = [], opPairs = [{ t: 0, v: 0 }];
     for (var c = 0; c < filtered.length; c++) {
       var t = filtered[c].t;
       if (t + 0.05 >= dur) break;
       var cp = toCompFn(filtered[c].x, filtered[c].y);
       var endT = Math.min(dur - 0.01, t + 0.42);
       posPairs.push({ t: Math.max(0, t - 0.01), v: cp });
-      szPairs.push({ t: Math.max(0, t - 0.01), v: [12, 12] });
-      szPairs.push({ t: endT, v: [92, 92] });
+      sclPairs.push({ t: Math.max(0, t - 0.01), v: [14, 14] });
+      sclPairs.push({ t: endT, v: [100, 100] });
       opPairs.push({ t: Math.max(0, t - 0.015), v: 0 });
       opPairs.push({ t: t, v: 92 });
       opPairs.push({ t: endT, v: 0 });
@@ -233,11 +247,11 @@
     for (var pk = 1; pk <= pos.numKeys; pk++) {
       try { pos.setInterpolationTypeAtKey(pk, KeyframeInterpolationType.HOLD, KeyframeInterpolationType.HOLD); } catch (_eh) {}
     }
-    setBatchKeys(sz, szPairs, dur);
+    setBatchKeys(scl, sclPairs, dur);
     setBatchKeys(op, opPairs, dur);
   }
 
-  function buildSmoothTravelBatch(compW, compH, dur, camPos, camScl, swivel, tilt, pts, travelZoom, isTutorial) {
+  function buildSmoothTravelBatch(compW, compH, dur, camNull, dirAdj, pts, travelZoom, isTutorial) {
     var cx = compW / 2, cy = compH / 2, z = travelZoom / 100;
     function clampPt(px, py) {
       var tx = cx - z * (px - cx), ty = cy - z * (py - cy);
@@ -275,7 +289,7 @@
         }
         pKeys.push({ t: st.t, v: clampPt(st.x, st.y) });
         sKeys.push({ t: st.t, v: [travelZoom, travelZoom] });
-        if (swivel && tilt && !isTutorial) {
+        if (dirAdj && !isTutorial) {
           swKeys.push({ t: st.t, v: ((st.x - cx) / cx) * 2.8 });
           tlKeys.push({ t: st.t, v: -((st.y - cy) / cy) * 1.8 });
         }
@@ -290,21 +304,30 @@
       var outT = Math.min(dur - 0.05, Math.max(holdEnd + 1.15, dur - 0.12));
       pKeys.push({ t: outT, v: [cx, cy] });
       sKeys.push({ t: outT, v: [100, 100] });
-      if (swivel && tilt && !isTutorial) {
+      if (dirAdj && !isTutorial) {
         swKeys.push({ t: outT, v: 0 });
         tlKeys.push({ t: outT, v: 0 });
       }
     }
 
+    var camPos = camNull.property("ADBE Transform Group").property("ADBE Position");
+    var camScl = camNull.property("ADBE Transform Group").property("ADBE Scale");
     setBatchKeys(camPos, pKeys, dur);
     setBatchKeys(camScl, sKeys, dur);
-    if (swivel && swKeys.length) setBatchKeys(swivel, swKeys, dur);
-    if (tilt && tlKeys.length) setBatchKeys(tilt, tlKeys, dur);
-
     easeProp(camPos, 90, true);
     easeProp(camScl, 90, false);
     camPos.expression = GIMBAL_EXPR;
     camScl.expression = GIMBAL_EXPR;
+
+    if (dirAdj && swKeys.length > 0) {
+      try {
+        var b3d = dirAdj.property("ADBE Effect Parade").property("ADBE Basic 3D");
+        if (b3d) {
+          setBatchKeys(b3d.property(1), swKeys, dur);
+          setBatchKeys(b3d.property(2), tlKeys, dur);
+        }
+      } catch (_eb) {}
+    }
     return stops.length;
   }
 
@@ -328,7 +351,7 @@
     var isTutorial = (args.editMode === "youtube_tutorial");
     var camStyle = args.cameraMode || "smooth_travel";
 
-    app.beginUndoGroup("Pixopik Turbo Studio Rig v1.5");
+    app.beginUndoGroup("Pixopik Turbo Studio Rig v1.5.1");
     try {
       var footage = app.project.importFile(new ImportOptions(vFile));
       var preset = args.aspectPreset || "youtube_16_9";
@@ -340,7 +363,7 @@
       var dur = Math.max(2, footage.duration || 10);
       var prefix = isTutorial ? "YT_Tutorial_" : "Studio_";
       var comp = app.project.items.addComp((prefix + vFile.name.replace(/\.[^\.]+$/, "")).slice(0, 58), compW, compH, 1, dur, 60);
-      comp.resolutionFactor = [2, 2]; /* Opens in fast Half-Res preview so zero initial freeze! */
+      comp.resolutionFactor = [2, 2];
       var useBlur = (args.motionBlur === true);
       comp.motionBlur = useBlur;
 
@@ -348,14 +371,13 @@
 
       var camNull = comp.layers.addNull(dur);
       camNull.name = "05_Smart_Camera_Rig";
-      var camTr = camNull.property("ADBE Transform Group");
-      camTr.property("ADBE Anchor Point").setValue([cx, cy]);
-      camTr.property("ADBE Position").setValue([cx, cy]);
-      camTr.property("ADBE Scale").setValue([100, 100]);
+      camNull.property("ADBE Transform Group").property("ADBE Anchor Point").setValue([cx, cy]);
+      camNull.property("ADBE Transform Group").property("ADBE Position").setValue([cx, cy]);
+      camNull.property("ADBE Transform Group").property("ADBE Scale").setValue([100, 100]);
 
       var vidLayer = comp.layers.add(footage);
       vidLayer.name = "02_Screen_Recording";
-      vidLayer.audioEnabled = false; /* Pure silent video ready for clean TTS Voiceover! */
+      vidLayer.audioEnabled = false;
 
       var defaultPad = isTutorial ? 95 : (preset === "shorts_9_16" ? 90 : 84);
       var padPct = (args.windowPaddingPercent || defaultPad) / 100;
@@ -385,8 +407,7 @@
         var baseS = args.cursorScale || (isTutorial ? 140 : 155);
         var curLayer = createAgencyCursor(comp, baseS, useBlur);
         curLayer.parent = camNull;
-        var cPos = curLayer.property("ADBE Transform Group").property("ADBE Position");
-        var cScl = curLayer.property("ADBE Transform Group").property("ADBE Scale");
+        curLayer.moveToBeginning();
 
         var posPairs = [];
         for (var k = 0; k < motion.cursorKeys.length; k++) {
@@ -395,7 +416,7 @@
           posPairs.push({ t: s.t, v: pt });
           compCursorPts.push({ t: s.t, x: pt[0], y: pt[1] });
         }
-        curCount = setBatchKeys(cPos, posPairs, dur);
+        curCount = setBatchKeys(curLayer.property("ADBE Transform Group").property("ADBE Position"), posPairs, dur);
 
         if (clicks.length > 0) {
           var sclPairs = [];
@@ -406,29 +427,23 @@
             sclPairs.push({ t: ct, v: [baseS * 0.78, baseS * 0.78] });
             sclPairs.push({ t: ct + 0.14, v: [baseS, baseS] });
           }
-          setBatchKeys(cScl, sclPairs, dur);
+          setBatchKeys(curLayer.property("ADBE Transform Group").property("ADBE Scale"), sclPairs, dur);
         }
-        curLayer.moveToBeginning();
       }
 
-      var swivel = null, tilt = null;
+      var dirAdj = null;
       if (!isTutorial) {
-        var dirAdj = comp.layers.addSolid([1, 1, 1], "06_Cinema_3D_Director", compW, compH, 1);
+        dirAdj = comp.layers.addSolid([1, 1, 1], "06_Cinema_3D_Director", compW, compH, 1);
         dirAdj.adjustmentLayer = true;
         dirAdj.moveToBeginning();
-        try {
-          var b3d = dirAdj.property("ADBE Effect Parade").addProperty("ADBE Basic 3D");
-          swivel = b3d.property(1); tilt = b3d.property(2);
-        } catch (_eB) {}
+        try { dirAdj.property("ADBE Effect Parade").addProperty("ADBE Basic 3D"); } catch (_eB) {}
       }
 
-      var camPos = camTr.property("ADBE Position"), camScl = camTr.property("ADBE Scale");
       var zoomClusters = 0;
-
       if (args.autoZoom !== false) {
         if (camStyle === "smooth_travel" && compCursorPts.length > 0) {
           var tZoom = args.zoomPercent || (isTutorial ? 142 : (preset === "shorts_9_16" ? 195 : 154));
-          zoomClusters = buildSmoothTravelBatch(compW, compH, dur, camPos, camScl, swivel, tilt, compCursorPts, tZoom, isTutorial);
+          zoomClusters = buildSmoothTravelBatch(compW, compH, dur, camNull, dirAdj, compCursorPts, tZoom, isTutorial);
         } else if (clicks.length > 0) {
           var zoomPct = args.zoomPercent || (isTutorial ? 145 : (preset === "shorts_9_16" ? 215 : 176));
           var z = zoomPct / 100, idx = 0, minGap = isTutorial ? 2.6 : 1.8;
@@ -455,9 +470,11 @@
             var exitT = Math.min(dur - 0.1, lastHold + 0.55);
             cpKeys.push({ t: exitT, v: [cx, cy] }); csKeys.push({ t: exitT, v: [100, 100] });
           }
-          setBatchKeys(camPos, cpKeys, dur);
-          setBatchKeys(camScl, csKeys, dur);
-          easeProp(camPos, 82, false); easeProp(camScl, 82, false);
+          var camP = camNull.property("ADBE Transform Group").property("ADBE Position");
+          var camS = camNull.property("ADBE Transform Group").property("ADBE Scale");
+          setBatchKeys(camP, cpKeys, dur);
+          setBatchKeys(camS, csKeys, dur);
+          easeProp(camP, 82, false); easeProp(camS, 82, false);
         }
       }
 
@@ -499,8 +516,8 @@
 
     app.beginUndoGroup("Apply Smooth Travel Glide");
     try {
-      var camTr = camNull.property("ADBE Transform Group");
-      var camPos = camTr.property("ADBE Position"), camScl = camTr.property("ADBE Scale");
+      var camPos = camNull.property("ADBE Transform Group").property("ADBE Position");
+      var camScl = camNull.property("ADBE Transform Group").property("ADBE Scale");
       while (camPos.numKeys > 0) camPos.removeKey(camPos.numKeys);
       while (camScl.numKeys > 0) camScl.removeKey(camScl.numKeys);
       camPos.expression = ""; camScl.expression = "";
@@ -511,19 +528,17 @@
         var pv = cPos.valueAtTime(t, false);
         pts.push({ t: t, x: pv[0], y: pv[1] });
       }
-      var swivel = null, tilt = null;
       if (dirAdj) {
         try {
           var b3d = dirAdj.property("ADBE Effect Parade").property("ADBE Basic 3D");
           if (b3d) {
-            swivel = b3d.property(1); tilt = b3d.property(2);
-            while (swivel.numKeys > 0) swivel.removeKey(swivel.numKeys);
-            while (tilt.numKeys > 0) tilt.removeKey(tilt.numKeys);
+            while (b3d.property(1).numKeys > 0) b3d.property(1).removeKey(b3d.property(1).numKeys);
+            while (b3d.property(2).numKeys > 0) b3d.property(2).removeKey(b3d.property(2).numKeys);
           }
         } catch (_e3) {}
       }
       var isYT = (comp.name.indexOf("YT_Tutorial_") === 0);
-      var wp = buildSmoothTravelBatch(comp.width, comp.height, comp.duration, camPos, camScl, swivel, tilt, pts, isYT ? 142 : 154, isYT);
+      var wp = buildSmoothTravelBatch(comp.width, comp.height, comp.duration, camNull, dirAdj, pts, isYT ? 142 : 154, isYT);
       return { ok: true, compName: comp.name, travelWaypoints: wp };
     } finally { app.endUndoGroup(); }
   }
@@ -537,15 +552,15 @@
       var box = comp.layers.addShape();
       box.name = "YT_Subscribe_Pill"; box.moveToBeginning();
       box.inPoint = t0; box.outPoint = Math.min(comp.duration, t0 + 3.4);
-      var sub = box.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group").property("ADBE Vectors Group");
-      var r = sub.addProperty("ADBE Vector Shape - Rect");
+
+      box.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group");
+      var r = vecSubGroup(box, 1).addProperty("ADBE Vector Shape - Rect");
       r.property("ADBE Vector Rect Size").setValue([340, 68]);
       r.property("ADBE Vector Rect Roundness").setValue(34);
-      sub.addProperty("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Color").setValue([0.92, 0.12, 0.15]);
+      vecSubGroup(box, 1).addProperty("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Color").setValue([0.92, 0.12, 0.15]);
 
-      var tr = box.property("ADBE Transform Group");
-      tr.property("ADBE Position").setValue([cx, yPos]);
-      var sc = tr.property("ADBE Scale");
+      box.property("ADBE Transform Group").property("ADBE Position").setValue([cx, yPos]);
+      var sc = box.property("ADBE Transform Group").property("ADBE Scale");
       setBatchKeys(sc, [
         { t: t0, v: [0, 0] },
         { t: t0 + 0.32, v: [106, 106] },
@@ -579,12 +594,13 @@
       var bar = comp.layers.addShape();
       bar.name = "YT_Chapter_Card"; bar.moveToBeginning();
       bar.inPoint = t0; bar.outPoint = Math.min(comp.duration, t0 + 3.8);
-      var sub = bar.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group").property("ADBE Vectors Group");
-      var r = sub.addProperty("ADBE Vector Shape - Rect");
+
+      bar.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group");
+      var r = vecSubGroup(bar, 1).addProperty("ADBE Vector Shape - Rect");
       r.property("ADBE Vector Rect Size").setValue([460, 64]);
       r.property("ADBE Vector Rect Roundness").setValue(14);
-      sub.addProperty("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Color").setValue([0.07, 0.09, 0.14]);
-      var st = sub.addProperty("ADBE Vector Graphic - Stroke");
+      vecSubGroup(bar, 1).addProperty("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Color").setValue([0.07, 0.09, 0.14]);
+      var st = vecSubGroup(bar, 1).addProperty("ADBE Vector Graphic - Stroke");
       st.property("ADBE Vector Stroke Color").setValue([0.39, 0.40, 0.96]);
       st.property("ADBE Vector Stroke Width").setValue(2.5);
 
