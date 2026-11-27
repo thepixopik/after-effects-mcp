@@ -1,366 +1,370 @@
 (function () {
-  var ws = null;
-  var pingTimer = null;
-  var recTimerInt = null;
-  var activeSessionDir = null;
-  var recStartMs = 0;
+  var fs = require("fs");
+  var path = require("path");
+  var os = require("os");
+  var cp = require("child_process");
 
-  var statusBadge = document.getElementById("statusBadge");
-  var statusText = document.getElementById("statusText");
-  var logList = document.getElementById("logList");
-  var wsInput = document.getElementById("wsUrl");
-  var quickBanner = document.getElementById("quickBanner");
+  function evalHostScript(code, cb) {
+    if (window.__adobe_cep__ && typeof window.__adobe_cep__.evalScript === "function") {
+      window.__adobe_cep__.evalScript(code, function (res) { if (cb) cb(res || ""); });
+    } else if (cb) { cb(""); }
+  }
 
-  function getNode(mod) {
+  function getExtRoot() {
+    var raw = "";
+    if (window.__adobe_cep__ && typeof window.__adobe_cep__.getSystemPath === "function") {
+      raw = window.__adobe_cep__.getSystemPath("extension") || "";
+    } else {
+      raw = decodeURI(window.location.pathname || "");
+    }
+    raw = raw.replace(/^file:\/+/i, "");
+    if (/^\/[A-Za-z]:/.test(raw)) raw = raw.slice(1);
+    return path.normalize(decodeURIComponent(raw));
+  }
+
+  var EXT_ROOT    = getExtRoot();
+  var HOST_JSX    = path.join(EXT_ROOT, "jsx", "host.jsx");
+  var PRO_RIG_JSX = path.join(EXT_ROOT, "jsx", "pro-studio-rig.jsx");
+  var REC_SCRIPT  = path.join(EXT_ROOT, "recorder", "capture-session.ps1");
+  var INST_SCRIPT = path.join(EXT_ROOT, "recorder", "install-ffmpeg.ps1");
+  var REC_ROOT    = path.join(os.homedir(), "Videos", "PixopikRecordings");
+  try { fs.mkdirSync(REC_ROOT, { recursive: true }); } catch (_e) {}
+
+  var statusBadge   = document.getElementById("statusBadge");
+  var statusText    = document.getElementById("statusText");
+  var quickBanner   = document.getElementById("quickBanner");
+  var wsInput       = document.getElementById("wsUrl");
+  var logList       = document.getElementById("logList");
+  var btnRecord     = document.getElementById("btnRecord");
+  var btnStop       = document.getElementById("btnStop");
+  var recTimer      = document.getElementById("recTimer");
+  var ffmpegBar     = document.getElementById("ffmpegBar");
+  var modeSelect    = document.getElementById("modeSelect");
+  var wallSelect    = document.getElementById("wallpaperSelect");
+  var frameSelect   = document.getElementById("frameStyleSelect");
+  var chkMicAudio   = document.getElementById("chkMicAudio");
+  var chkMotionBlur = document.getElementById("chkMotionBlur");
+
+  function log(msg, level) {
+    var row = document.createElement("div");
+    row.className = "log-item " + (level || "info");
+    row.textContent = "[" + new Date().toLocaleTimeString() + "] " + msg;
+    logList.insertBefore(row, logList.firstChild);
+    while (logList.children.length > 60) logList.removeChild(logList.lastChild);
+  }
+
+  function loadExtendScripts(cb) {
+    var p1 = HOST_JSX.replace(/\\/g, "/");
+    var p2 = PRO_RIG_JSX.replace(/\\/g, "/");
+    var loader = 'try { $.evalFile(new File("' + p1 + '")); $.evalFile(new File("' + p2 + '")); "OK"; } catch(e) { "ERR:" + e; }';
+    evalHostScript(loader, function (res) {
+      if (cb) cb(res);
+    });
+  }
+
+  function evalJSX(action, argsObj) {
+    return new Promise(function (resolve) {
+      var b64 = Buffer.from(JSON.stringify(argsObj || {}), "utf8").toString("base64");
+      var callCode = 'PixopikAE.dispatch("' + action + '", "' + b64 + '")';
+      evalHostScript(callCode, function (raw) {
+        if (!raw || raw === "EvalScript error." || raw.indexOf("ReferenceError") !== -1) {
+          loadExtendScripts(function () {
+            evalHostScript(callCode, function (retryRaw) {
+              try { resolve(JSON.parse(retryRaw)); }
+              catch (_e2) { resolve({ ok: false, error: retryRaw || "ExtendScript error" }); }
+            });
+          });
+          return;
+        }
+        try { resolve(JSON.parse(raw)); }
+        catch (_e) { resolve({ ok: true, raw: raw }); }
+      });
+    });
+  }
+
+  loadExtendScripts(function (res) {
+    if (String(res).indexOf("OK") === 0) {
+      quickBanner.textContent = "v1.1 Ready • SaaS Promo + YouTube Tutorial + Live Mic";
+      log("Studio Pro v1.1 engine loaded (SaaS + YouTube + Mic)", "ok");
+    } else {
+      log("Engine init: " + res, "err");
+    }
+  });
+
+  if (modeSelect) {
+    modeSelect.onchange = function () {
+      var isYT = (modeSelect.value === "youtube_tutorial");
+      chkMicAudio.checked = isYT;
+      chkMotionBlur.checked = !isYT;
+      if (isYT) {
+        wallSelect.value = "dark_carbon";
+        frameSelect.value = "minimal_rounded";
+        log("Switched to YouTube Tutorial Mode (95% Big Screen • Flat 145% Zoom • Mic ON)", "ok");
+      } else {
+        wallSelect.value = "cosmic_indigo";
+        frameSelect.value = "macos_glass";
+        log("Switched to SaaS Promo Mode (84% Frame • 3D + 178% Zoom)", "ok");
+      }
+    };
+  }
+
+  function hasFfmpegInstalled() {
     try {
-      if (window.cep_node && window.cep_node.require) return window.cep_node.require(mod);
-      if (typeof require === "function") return require(mod);
+      var r = cp.spawnSync("where.exe", ["ffmpeg"], { windowsHide: true });
+      if (r && r.status === 0) return true;
+    } catch (_e) {}
+    var wg = path.join(process.env.LOCALAPPDATA || "", "Microsoft", "WinGet", "Packages");
+    try {
+      if (fs.existsSync(wg)) {
+        var dirs = fs.readdirSync(wg);
+        for (var i = 0; i < dirs.length; i++) {
+          if (dirs[i].toLowerCase().indexOf("ffmpeg") !== -1) return true;
+        }
+      }
+    } catch (_e2) {}
+    return fs.existsSync("C:\\ffmpeg\\bin\\ffmpeg.exe");
+  }
+
+  if (!hasFfmpegInstalled()) ffmpegBar.classList.remove("hidden");
+
+  document.getElementById("btnInstallFfmpeg").onclick = function () {
+    log("Installing FFmpeg via Windows Winget...", "info");
+    var ps = cp.spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", INST_SCRIPT], { windowsHide: true });
+    ps.on("close", function () {
+      if (hasFfmpegInstalled()) {
+        ffmpegBar.classList.add("hidden");
+        log("FFmpeg ready!", "ok");
+      }
+    });
+  };
+
+  function simplifyTrajectory(samples, stepSec) {
+    if (!samples || !samples.length) return [];
+    var out = [samples[0]], last = samples[0];
+    for (var i = 1; i < samples.length - 1; i++) {
+      var s = samples[i];
+      var dt = s.t - last.t;
+      var dist = Math.hypot(s.x - last.x, s.y - last.y);
+      if (dt >= (stepSec || 0.032) || dist >= 16) {
+        out.push(s);
+        last = s;
+      }
+    }
+    if (samples.length > 1) out.push(samples[samples.length - 1]);
+    return out;
+  }
+
+  function findLatestRecording() {
+    try {
+      var entries = fs.readdirSync(REC_ROOT).map(function (name) {
+        var full = path.join(REC_ROOT, name);
+        var st = fs.statSync(full);
+        return st.isDirectory() ? { name: name, dir: full, mtime: st.mtimeMs } : null;
+      }).filter(Boolean).sort(function (a, b) { return b.mtime - a.mtime; });
+
+      for (var i = 0; i < entries.length; i++) {
+        var mp4 = path.join(entries[i].dir, "screen.mp4");
+        var mot = path.join(entries[i].dir, "motion.json");
+        if (fs.existsSync(mp4)) return { dir: entries[i].dir, videoPath: mp4, motionPath: fs.existsSync(mot) ? mot : null };
+      }
     } catch (_e) {}
     return null;
   }
 
-  function encodeB64Utf8(str) {
-    return window.btoa(unescape(encodeURIComponent(str)));
-  }
-
-  function log(msg) {
-    if (quickBanner) quickBanner.textContent = msg;
-    var line = document.createElement("div");
-    var t = new Date().toLocaleTimeString();
-    line.textContent = "[" + t + "] " + msg;
-    logList.appendChild(line);
-    logList.scrollTop = logList.scrollHeight;
-  }
-
-  function setStatus(state, label) {
-    statusBadge.className = "status " + state;
-    statusText.textContent = label;
-  }
-
-  function evalJSX(script) {
-    return new Promise(function (resolve, reject) {
-      if (!window.__adobe_cep__) {
-        reject(new Error("Adobe CEP runtime not detected."));
-        return;
-      }
-      window.__adobe_cep__.evalScript(script, function (res) {
-        if (!res || res === "EvalScript error.") {
-          reject(new Error("ExtendScript error — verify Allow Scripts to Write Files is ON."));
-        } else {
-          resolve(res);
-        }
-      });
-    });
-  }
-
-  function getExtensionRoot() {
-    var uri = decodeURIComponent(window.location.pathname || "");
-    if (/^\/[A-Za-z]:/.test(uri)) uri = uri.slice(1);
-    var idx = uri.lastIndexOf("/");
-    return idx > 0 ? uri.slice(0, idx) : uri;
-  }
-
-  var hostLoaded = false;
-  function ensureHostLoaded() {
-    if (hostLoaded) return Promise.resolve();
-    return new Promise(function (resolve) {
-      var root = getExtensionRoot().replace(/\\/g, "/");
-      var boot = 'if (typeof PixopikAE === "undefined") { $.evalFile("' + root + '/jsx/host.jsx"); } ' +
-                 'if (typeof PixopikAE !== "undefined" && !PixopikAE._addonLoaded) { $.evalFile("' + root + '/jsx/recorder-addon.jsx"); } ' +
-                 'if (typeof PixopikAE !== "undefined" && !PixopikAE._proRigLoaded) { $.evalFile("' + root + '/jsx/pro-studio-rig.jsx"); } ' +
-                 '"OK"';
-      window.__adobe_cep__.evalScript(boot, function () {
-        hostLoaded = true;
-        resolve();
-      });
-    });
-  }
-
-  function callHost(action, argsObj) {
-    return ensureHostLoaded().then(function () {
-      var b64 = encodeB64Utf8(JSON.stringify(argsObj || {}));
-      var code = 'PixopikAE.dispatch("' + action + '", "' + b64 + '")';
-      return evalJSX(code).then(function (raw) {
-        var parsed = JSON.parse(raw);
-        if (parsed && parsed.ok === false) {
-          throw new Error(parsed.error || "ExtendScript error");
-        }
-        return parsed;
-      });
-    });
-  }
-
-  function readUiRigOptions() {
-    var wp = document.getElementById("wallpaperSelect");
-    var fs = document.getElementById("frameStyleSelect");
-    var mb = document.getElementById("chkMotionBlur");
+  function currentStudioPrefs() {
+    var isYT = (modeSelect.value === "youtube_tutorial");
     return {
+      editMode: modeSelect.value,
       aspectPreset: document.getElementById("aspectSelect").value,
-      wallpaper: wp ? wp.value : "cosmic_indigo",
-      frameStyle: fs ? fs.value : "macos_glass",
+      wallpaper: wallSelect.value,
+      frameStyle: frameSelect.value,
       autoZoom: document.getElementById("chkAutoZoom").checked,
       vectorCursor: document.getElementById("chkVectorCursor").checked,
       clickRipples: document.getElementById("chkRipples").checked,
-      motionBlur: mb ? mb.checked : true
+      motionBlur: chkMotionBlur.checked,
+      cursorScale: isYT ? 140 : 155
     };
   }
 
-  function processMotionTelemetry(motionData) {
-    if (!motionData || !Array.isArray(motionData.samples) || motionData.samples.length === 0) {
-      return { cursorKeys: [], zoomSegments: [], clicks: [] };
+  async function autoRigBundle(bundle, overrides) {
+    var motion = null;
+    if (bundle.motionPath && fs.existsSync(bundle.motionPath)) {
+      try {
+        var raw = fs.readFileSync(bundle.motionPath, "utf8").replace(/^\uFEFF/, "");
+        motion = JSON.parse(raw);
+        var step = (motion.duration && motion.duration > 180) ? 0.048 : 0.032;
+        motion.cursorKeys = simplifyTrajectory(motion.samples || [], step);
+        delete motion.samples;
+      } catch (e) { log("Motion telemetry parse warning: " + e.message, "err"); }
     }
-    var raw = motionData.samples;
-    var smoothed = [];
-    var sx = raw[0].x, sy = raw[0].y, alpha = 0.28;
-
-    for (var i = 0; i < raw.length; i++) {
-      sx = sx + alpha * (raw[i].x - sx);
-      sy = sy + alpha * (raw[i].y - sy);
-      smoothed.push({ t: raw[i].t, x: Math.round(sx), y: Math.round(sy) });
+    var payload = Object.assign({ videoPath: bundle.videoPath.replace(/\\/g, "/"), motion: motion }, currentStudioPrefs(), overrides || {});
+    log("Building " + (payload.editMode === "youtube_tutorial" ? "YouTube Tutorial" : "SaaS Promo") + " timeline...", "info");
+    var res = await evalJSX("import_and_autorig_recording", payload);
+    if (res && res.ok) {
+      log("Rigged: " + res.compName + " (" + (res.autoZoomClusters || 0) + " zooms)", "ok");
+    } else {
+      log("Auto-rig error: " + JSON.stringify(res), "err");
     }
-
-    var step = Math.max(1, Math.ceil(smoothed.length / 240));
-    var cursorKeys = [], prevT = -1;
-    for (var j = 0; j < smoothed.length; j += step) {
-      if (smoothed[j].t - prevT >= 0.035) {
-        cursorKeys.push(smoothed[j]);
-        prevT = smoothed[j].t;
-      }
-    }
-    var last = smoothed[smoothed.length - 1];
-    if (!cursorKeys.length || cursorKeys[cursorKeys.length - 1].t < last.t) cursorKeys.push(last);
-
-    var clicks = Array.isArray(motionData.clicks) ? motionData.clicks.slice(0, 80) : [];
-    var zoomSegments = [];
-    for (var c = 0; c < clicks.length; c++) {
-      var clk = clicks[c];
-      var prevSeg = zoomSegments[zoomSegments.length - 1];
-      if (prevSeg && clk.t - prevSeg.endTime < 1.9) {
-        prevSeg.endTime = clk.t + 1.4;
-        prevSeg.x = Math.round((prevSeg.x + clk.x) / 2);
-        prevSeg.y = Math.round((prevSeg.y + clk.y) / 2);
-      } else {
-        zoomSegments.push({
-          startTime: Math.max(0.15, Number((clk.t - 0.35).toFixed(2))),
-          endTime: Number((clk.t + 1.45).toFixed(2)),
-          x: clk.x,
-          y: clk.y
-        });
-      }
-    }
-
-    return {
-      screenWidth: motionData.screenWidth || 1920,
-      screenHeight: motionData.screenHeight || 1080,
-      duration: motionData.duration || 10,
-      cursorKeys: cursorKeys,
-      clicks: clicks,
-      zoomSegments: zoomSegments.slice(0, 25)
-    };
-  }
-
-  async function handleAutoRig(args) {
-    var uiDefaults = readUiRigOptions();
-    var merged = Object.assign({}, uiDefaults, args || {});
-    var info = await callHost("resolve_recording_session", {
-      sessionFolder: merged.sessionFolder || "latest",
-      videoPath: merged.videoPath || "",
-      motionJsonPath: merged.motionJsonPath || ""
-    });
-    var processedMotion = null;
-    if (info.motionText) {
-      try { processedMotion = processMotionTelemetry(JSON.parse(info.motionText)); } catch (_e) {}
-    }
-    var payload = Object.assign({}, merged, { videoPath: info.videoPath, motion: processedMotion });
-    log("Pro-rigging " + info.videoPath.split("/").pop() + "...");
-    var res = await callHost("import_and_autorig_recording", payload);
-    log("Pro Studio Ready: " + res.compName);
     return res;
   }
 
-  async function executeTool(tool, args) {
-    if (tool === "import_and_autorig_recording") {
-      return { output: await handleAutoRig(args || {}) };
-    }
-    if (tool === "export_frame_preview") {
-      var frameRes = await callHost("export_frame_preview_b64", { timeSeconds: args ? args.timeSeconds : undefined });
-      if (frameRes && frameRes.base64) {
-        return { base64: frameRes.base64, mimeType: "image/png", output: { ok: true, comp: frameRes.comp, timeSeconds: frameRes.timeSeconds } };
-      }
-      return { output: frameRes };
-    }
-    return { output: await callHost(tool, args || {}) };
-  }
+  var activeSession = null, timerInterval = null, startEpoch = 0;
 
-  function connectWS() {
-    if (ws) { try { ws.close(); } catch (_e) {} }
-    setStatus("connecting", "Connecting...");
-    ws = new WebSocket(wsInput.value.trim());
+  btnRecord.onclick = function () {
+    if (!hasFfmpegInstalled()) {
+      ffmpegBar.classList.remove("hidden");
+      log("Click Auto-Install FFmpeg first.", "err");
+      return;
+    }
+    var stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    var sessionDir = path.join(REC_ROOT, "rec_" + stamp);
+    fs.mkdirSync(sessionDir, { recursive: true });
 
-    ws.onopen = function () {
-      setStatus("connected", "Pro v1.0 Live");
-      log("Connected! Pro Screen Studio v1.0 Active.");
-      ws.send(JSON.stringify({ type: "hello", app: "after-effects", version: "1.0.0" }));
-      clearInterval(pingTimer);
-      pingTimer = setInterval(function () {
-        if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "ping" }));
-      }, 25000);
+    var countdownSec = parseInt(document.getElementById("countdownSelect").value || "3", 10);
+    var useMicFlag = chkMicAudio.checked ? "1" : "0";
+    activeSession = {
+      dir: sessionDir,
+      stopSignal: path.join(sessionDir, "stop.signal"),
+      doneSignal: path.join(sessionDir, "done.signal"),
+      videoPath: path.join(sessionDir, "screen.mp4"),
+      motionPath: path.join(sessionDir, "motion.json")
     };
 
-    ws.onmessage = async function (ev) {
-      var msg;
-      try { msg = JSON.parse(ev.data); } catch (_e) { return; }
-      if (msg.type === "ae_command" && msg.id) {
-        log("AI Tool -> " + msg.tool);
-        try {
-          var res = await executeTool(msg.tool, msg.args || {});
-          ws.send(JSON.stringify(Object.assign({ id: msg.id, ok: true }, res)));
-          log("Done: " + msg.tool);
-        } catch (err) {
-          log("Error: " + err.message);
-          ws.send(JSON.stringify({ id: msg.id, ok: false, error: String(err.message || err) }));
+    cp.spawn("powershell.exe", [
+      "-NoProfile", "-ExecutionPolicy", "Bypass", "-STA",
+      "-File", REC_SCRIPT,
+      "-SessionDir", sessionDir,
+      "-Fps", "60",
+      "-Countdown", String(countdownSec),
+      "-UseMic", useMicFlag
+    ], { detached: true, windowsHide: true });
+
+    btnRecord.classList.add("hidden");
+    btnStop.classList.remove("hidden");
+    recTimer.classList.remove("hidden");
+    startEpoch = Date.now() + (countdownSec * 1000);
+    log("Recorder started (" + (useMicFlag === "1" ? "60fps + Live Mic" : "60fps Screen") + ")...", "ok");
+
+    var finishing = false;
+    timerInterval = setInterval(async function () {
+      var diff = Math.floor((Date.now() - startEpoch) / 1000);
+      if (diff < 0) {
+        recTimer.textContent = "Starting in " + Math.abs(diff) + "s • Switch to your app!";
+      } else {
+        var sec = String(diff % 60).padStart(2, "0");
+        var min = String(Math.floor(diff / 60)).padStart(2, "0");
+        recTimer.textContent = min + ":" + sec + (useMicFlag === "1" ? " • REC 60fps + Mic ON" : " • REC 60fps");
+      }
+
+      if (!finishing && activeSession && fs.existsSync(activeSession.doneSignal)) {
+        finishing = true;
+        clearInterval(timerInterval);
+        btnStop.classList.add("hidden");
+        btnRecord.classList.remove("hidden");
+        recTimer.classList.add("hidden");
+
+        var status = "";
+        try { status = fs.readFileSync(activeSession.doneSignal, "utf8").trim(); } catch (_e) {}
+        if (status.indexOf("ERROR:") === 0) {
+          log("Recorder error: " + status, "err");
+        } else if (fs.existsSync(activeSession.videoPath)) {
+          log("Capture saved! Auto-rigging in After Effects...", "ok");
+          await autoRigBundle(activeSession);
         }
+        activeSession = null;
       }
-    };
-
-    ws.onclose = function () {
-      setStatus("disconnected", "Disconnected");
-      clearInterval(pingTimer);
-      setTimeout(connectWS, 4000);
-    };
-  }
-
-  function finishAndRigSession() {
-    clearInterval(recTimerInt);
-    document.getElementById("btnStop").classList.add("hidden");
-    document.getElementById("btnRecord").classList.remove("hidden");
-    document.getElementById("recTimer").classList.add("hidden");
-    handleAutoRig({ sessionFolder: String(activeSessionDir).replace(/\\/g, "/") })
-      .catch(function (e) { log("Rig error: " + e.message); });
-  }
-
-  document.getElementById("btnRecord").onclick = async function () {
-    try {
-      var cdEl = document.getElementById("countdownSelect");
-      var cdSec = cdEl ? parseInt(cdEl.value, 10) : 3;
-      log("Launching 60fps Pro Recorder (" + cdSec + "s countdown)...");
-
-      var cp = getNode("child_process"), fs = getNode("fs"), path = getNode("path"), os = getNode("os");
-      if (cp && fs && path && os) {
-        var recRoot = path.join(os.homedir(), "Videos", "PixopikRecordings");
-        fs.mkdirSync(recRoot, { recursive: true });
-        var stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-        activeSessionDir = path.join(recRoot, "rec_" + stamp);
-        fs.mkdirSync(activeSessionDir, { recursive: true });
-        var psScript = path.join(getExtensionRoot(), "recorder", "capture-session.ps1");
-        cp.spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", psScript, "-SessionDir", activeSessionDir, "-Fps", "60", "-Countdown", String(cdSec)], { windowsHide: true });
-      } else {
-        var startRes = await callHost("start_screen_recorder", { extRoot: getExtensionRoot() });
-        activeSessionDir = startRes.sessionDir;
-      }
-
-      document.getElementById("btnRecord").classList.add("hidden");
-      document.getElementById("btnStop").classList.remove("hidden");
-      var timerEl = document.getElementById("recTimer");
-      timerEl.classList.remove("hidden");
-      recStartMs = Date.now();
-      log("Switch to Chrome/App! Click floating Stop & Rig pill when done.");
-
-      recTimerInt = setInterval(async function () {
-        var sec = Math.floor((Date.now() - recStartMs) / 1000);
-        var mm = ("0" + Math.floor(sec / 60)).slice(-2);
-        var ss = ("0" + (sec % 60)).slice(-2);
-        timerEl.textContent = mm + ":" + ss + " • Floating Stop Pill Active";
-        try {
-          var st = await callHost("check_recorder_done", { sessionDir: String(activeSessionDir).replace(/\\/g, "/") });
-          if (st && st.done) {
-            if (st.status && st.status.indexOf("FFMPEG_NOT_FOUND") !== -1) {
-              clearInterval(recTimerInt);
-              document.getElementById("ffmpegBar").classList.remove("hidden");
-              log("FFmpeg missing — click Auto-Install!");
-              return;
-            }
-            finishAndRigSession();
-          }
-        } catch (_e) {}
-      }, 800);
-    } catch (err) {
-      log("Record error: " + err.message);
-    }
+    }, 350);
   };
 
-  document.getElementById("btnStop").onclick = async function () {
-    document.getElementById("recTimer").textContent = "Finalizing 60fps MP4 & Rigging...";
-    try {
-      var fs = getNode("fs"), path = getNode("path");
-      if (fs && path && activeSessionDir) {
-        fs.writeFileSync(path.join(activeSessionDir, "stop.signal"), "STOP", "utf8");
-      } else {
-        await callHost("stop_screen_recorder", { sessionDir: activeSessionDir });
-      }
-    } catch (err) {
-      log("Stop error: " + err.message);
-    }
+  btnStop.onclick = function () {
+    if (!activeSession) return;
+    recTimer.textContent = "Finalizing MP4 & Auto-Rigging...";
+    try { fs.writeFileSync(activeSession.stopSignal, "STOP", "utf8"); } catch (_e) {}
   };
 
-  document.getElementById("btnRigLatest").onclick = function () {
-    handleAutoRig({ sessionFolder: "latest" }).catch(function (e) { log("Error: " + e.message); });
+  document.getElementById("btnRigLatest").onclick = async function () {
+    var latest = findLatestRecording();
+    if (!latest) return log("No recordings found in Videos/PixopikRecordings yet.", "err");
+    await autoRigBundle(latest);
   };
 
   document.getElementById("btnRigFile").onclick = async function () {
-    try {
-      var pick = await callHost("pick_video_file", {});
-      if (pick && pick.videoPath) {
-        await handleAutoRig({ videoPath: pick.videoPath, motionJsonPath: pick.motionJsonPath || "" });
-      }
-    } catch (e) { log("Import error: " + e.message); }
+    evalHostScript('var f = File.openDialog("Select MP4/MOV video"); f ? f.fsName : "";', async function (chosen) {
+      if (!chosen) return;
+      var mot = path.join(path.dirname(chosen), "motion.json");
+      await autoRigBundle({ videoPath: chosen, motionPath: fs.existsSync(mot) ? mot : null });
+    });
   };
 
-  var btnUp = document.getElementById("btnUpgradeComp");
-  if (btnUp) {
-    btnUp.onclick = function () {
-      var wp = document.getElementById("wallpaperSelect");
-      callHost("upgrade_active_comp", { wallpaper: wp ? wp.value : "cosmic_indigo" })
-        .then(function (r) { log("Upgraded comp: " + r.compName); }).catch(function (e) { log(e.message); });
-    };
-  }
-
-  var btnFfmpeg = document.getElementById("btnInstallFfmpeg");
-  if (btnFfmpeg) {
-    btnFfmpeg.onclick = function () {
-      callHost("install_ffmpeg_winget", {}).then(function () { log("Winget FFmpeg installer opened!"); });
-    };
-  }
-
-  var btnNewComp = document.getElementById("btnNewComp");
-  if (btnNewComp) {
-    btnNewComp.onclick = function () {
-      callHost("create_composition", { name: "Pixopik_Pro_Studio", preset: document.getElementById("aspectSelect").value })
-        .then(function (r) { log("Created comp: " + r.compName); }).catch(function (e) { log(e.message); });
-    };
-  }
-
-  document.getElementById("btnAddZoom").onclick = function () {
-    callHost("add_smart_zoom_at_playhead", { zoomPercent: 190 }).then(function () { log("Added Smart Zoom!"); }).catch(function (e) { log(e.message); });
+  document.getElementById("btnSubscribe").onclick = async function () {
+    var r = await evalJSX("add_youtube_subscribe", {});
+    log(r && r.ok ? "Added YouTube Subscribe Pill at playhead!" : JSON.stringify(r), r && r.ok ? "ok" : "err");
   };
-  document.getElementById("btnSpotlight").onclick = function () {
-    callHost("add_spotlight_at_playhead", {}).then(function () { log("Added Spotlight Focus!"); }).catch(function (e) { log(e.message); });
+  document.getElementById("btnChapter").onclick = async function () {
+    var title = window.prompt("Enter YouTube Chapter / Step Title:", "STEP 01  •  Getting Started");
+    if (!title) return;
+    var r = await evalJSX("add_youtube_chapter", { title: title });
+    log(r && r.ok ? "Added YouTube Chapter Lower-Third!" : JSON.stringify(r), r && r.ok ? "ok" : "err");
   };
-  document.getElementById("btnBlur").onclick = function () {
-    callHost("add_blur_at_playhead", {}).then(function () { log("Added Privacy Blur!"); }).catch(function (e) { log(e.message); });
-  };
-  document.getElementById("btnCallout").onclick = function () {
-    callHost("add_callout_at_playhead", { text: "Pro Tip • Click Here" }).then(function () { log("Added SaaS Callout!"); }).catch(function (e) { log(e.message); });
-  };
-  document.getElementById("btnShorts").onclick = function () {
-    callHost("convert_comp_for_shorts", { zoomPercent: 210 }).then(function () { log("Converted to 9:16 Shorts!"); }).catch(function (e) { log(e.message); });
-  };
-  document.getElementById("btn3dTilt").onclick = function () {
-    callHost("apply_3d_saas_perspective", {}).then(function () { log("Applied 3D SaaS Tilt!"); }).catch(function (e) { log(e.message); });
-  };
-
-  document.getElementById("btnReconnect").onclick = connectWS;
+  document.getElementById("btnAddZoom").onclick = function () { evalJSX("add_smart_zoom_segment", { startTime: 1, holdDuration: 1.5, targetX: 960, targetY: 540, zoomPercent: 160 }); };
+  document.getElementById("btnSpotlight").onclick = function () { evalJSX("add_spotlight_focus", { startTime: 1, duration: 2.5, centerX: 960, centerY: 540, radiusX: 280, radiusY: 160, dimOpacity: 68 }); };
+  document.getElementById("btnBlur").onclick = function () { evalJSX("add_blur_redact_zone", { startTime: 0, duration: 5, x: 960, y: 220, width: 420, height: 90, blurriness: 45 }); };
+  document.getElementById("btnCallout").onclick = function () { evalJSX("add_saas_callout", { text: "Ctrl + K  •  Quick Action", startTime: 1, duration: 2.8, x: 960, y: 150, accentHex: "#6366F1" }); };
+  document.getElementById("btnShorts").onclick = function () { evalJSX("convert_comp_for_shorts", { followCursor: true }); };
+  document.getElementById("btn3dTilt").onclick = function () { evalJSX("apply_3d_saas_perspective", { swivelDeg: 10, tiltDeg: -4, animateFloat: true }); };
   document.getElementById("btnClearLog").onclick = function () { logList.innerHTML = ""; };
 
+  var ws = null, reconnectTimer = null;
+  function setStatus(connected, text) {
+    statusBadge.className = "status " + (connected ? "connected" : "disconnected");
+    statusText.textContent = text;
+  }
+
+  async function handleCommand(msg) {
+    var action = msg.action, args = msg.args || {};
+    log("MCP -> " + action, "info");
+    if (action === "get_project_info") {
+      var info = await evalJSX("get_project_info", {});
+      var latest = findLatestRecording();
+      info.recordingsRoot = REC_ROOT;
+      info.latestRecording = latest ? latest.videoPath : null;
+      return info;
+    }
+    if (action === "import_and_autorig_recording") {
+      var target = (!args.videoPath || args.videoPath === "latest")
+        ? findLatestRecording()
+        : { videoPath: args.videoPath, motionPath: args.motionJsonPath || null };
+      if (!target) return { ok: false, error: "No recording found." };
+      return await autoRigBundle(target, args);
+    }
+    return await evalJSX(action, args);
+  }
+
+  function connectWS() {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    try { if (ws) ws.close(); } catch (_e) {}
+    var url = (wsInput.value || "").trim();
+    setStatus(false, "Connecting...");
+    ws = new WebSocket(url);
+    ws.onopen = function () { setStatus(true, "Pro v1.1 Live"); log("Connected to Cloud MCP Relay!", "ok"); };
+    ws.onmessage = async function (ev) {
+      var msg;
+      try { msg = JSON.parse(ev.data); } catch (_e) { return; }
+      if (!msg || !msg.id || !msg.action) return;
+      try {
+        var result = await handleCommand(msg);
+        ws.send(JSON.stringify({ id: msg.id, result: result }));
+      } catch (err) {
+        ws.send(JSON.stringify({ id: msg.id, error: String(err && err.message ? err.message : err) }));
+      }
+    };
+    ws.onclose = function () {
+      setStatus(false, "Reconnecting...");
+      reconnectTimer = setTimeout(connectWS, 3500);
+    };
+    ws.onerror = function () {};
+  }
+
+  document.getElementById("btnReconnect").onclick = connectWS;
   connectWS();
 })();
