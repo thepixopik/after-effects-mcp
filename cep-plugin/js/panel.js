@@ -3,8 +3,6 @@
   var path = require("path");
   var os = require("os");
   var cp = require("child_process");
-  var http = require("http");
-  var urlMod = require("url");
 
   function evalHostScript(code, cb) {
     if (window.__adobe_cep__ && typeof window.__adobe_cep__.evalScript === "function") {
@@ -24,14 +22,14 @@
     return path.normalize(decodeURIComponent(raw));
   }
 
-  var EXT_ROOT     = getExtRoot();
-  var HOST_JSX     = path.join(EXT_ROOT, "jsx", "host.jsx");
-  var PRO_RIG_JSX  = path.join(EXT_ROOT, "jsx", "pro-studio-rig.jsx");
-  var REC_SCRIPT   = path.join(EXT_ROOT, "recorder", "capture-session.ps1");
-  var GHOST_SCRIPT = path.join(EXT_ROOT, "recorder", "ghost-presenter.ps1");
-  var INST_SCRIPT  = path.join(EXT_ROOT, "recorder", "install-ffmpeg.ps1");
-  var REC_ROOT     = path.join(os.homedir(), "Videos", "PixopikRecordings");
-  var CHROME_EXT_DIR = path.join(REC_ROOT, "Pixopik_Chrome_Extension");
+  var EXT_ROOT       = getExtRoot();
+  var HOST_JSX       = path.join(EXT_ROOT, "jsx", "host.jsx");
+  var PRO_RIG_JSX    = path.join(EXT_ROOT, "jsx", "pro-studio-rig.jsx");
+  var REC_SCRIPT     = path.join(EXT_ROOT, "recorder", "capture-session.ps1");
+  var GHOST_SCRIPT   = path.join(EXT_ROOT, "recorder", "ghost-presenter.ps1");
+  var BROWSER_SCRIPT = path.join(EXT_ROOT, "recorder", "studio-browser.ps1");
+  var INST_SCRIPT    = path.join(EXT_ROOT, "recorder", "install-ffmpeg.ps1");
+  var REC_ROOT       = path.join(os.homedir(), "Videos", "PixopikRecordings");
   try { fs.mkdirSync(REC_ROOT, { recursive: true }); } catch (_e) {}
 
   var statusBadge      = document.getElementById("statusBadge");
@@ -59,40 +57,6 @@
     while (logList.children.length > 60) logList.removeChild(logList.lastChild);
   }
 
-  // Local Ghost Presenter Command Bridge (127.0.0.1:47832) -> Chrome Extension
-  var cmdEvents = [];
-  var cmdSeq = 0;
-  function pushGhostEvent(tool, extraUrl) {
-    cmdSeq++;
-    cmdEvents.push({ seq: cmdSeq, tool: tool, url: extraUrl || "", ts: Date.now() });
-    if (cmdEvents.length > 40) cmdEvents.shift();
-  }
-
-  try {
-    var bridgeSrv = http.createServer(function (req, res) {
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Content-Type", "application/json");
-      var parsed = urlMod.parse(req.url || "", true);
-      if (parsed.pathname === "/cmd") {
-        var tl = String(parsed.query.tool || "cursor");
-        var u  = String(parsed.query.url || "");
-        pushGhostEvent(tl, u);
-        log("Ghost Tool -> " + tl + (u ? " (" + u + ")" : ""), "info");
-        res.end(JSON.stringify({ ok: true, seq: cmdSeq }));
-        return;
-      }
-      if (parsed.pathname === "/poll") {
-        var since = parseInt(String(parsed.query.since || "0"), 10) || 0;
-        var fresh = cmdEvents.filter(function (e) { return e.seq > since; });
-        res.end(JSON.stringify({ ok: true, events: fresh }));
-        return;
-      }
-      res.end(JSON.stringify({ ok: true, service: "pixopik-ghost-bridge" }));
-    });
-    bridgeSrv.on("error", function () {});
-    bridgeSrv.listen(47832, "127.0.0.1");
-  } catch (_srvErr) {}
-
   function psSingleQuote(s) {
     return "'" + String(s).replace(/'/g, "''") + "'";
   }
@@ -105,48 +69,30 @@
     ], Object.assign({ windowsHide: true }, opts || {}));
   }
 
-  function findChromeExe() {
-    var candidates = [
-      path.join(process.env["PROGRAMFILES"] || "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe"),
-      path.join(process.env["PROGRAMFILES(X86)"] || "C:\\Program Files (x86)", "Google", "Chrome", "Application", "chrome.exe"),
-      path.join(process.env.LOCALAPPDATA || "", "Google", "Chrome", "Application", "chrome.exe")
-    ];
-    for (var i = 0; i < candidates.length; i++) {
-      if (fs.existsSync(candidates[i])) return candidates[i];
-    }
-    return null;
-  }
-
   var ghostBarProc = null;
   function openGhostToolbar() {
     if (ghostBarProc && !ghostBarProc.killed) {
       try { ghostBarProc.kill(); } catch (_e) {}
     }
-    ghostBarProc = spawnEncodedPowerShell("& " + psSingleQuote(GHOST_SCRIPT) + " -Port 47832");
+    ghostBarProc = spawnEncodedPowerShell("& " + psSingleQuote(GHOST_SCRIPT));
     ghostBarProc.on("exit", function () { ghostBarProc = null; });
-    log("Ghost Toolbar active (visible to you, 100% invisible in MP4!)", "ok");
+    log("Ghost Toolbar docked at bottom (invisible in MP4!)", "ok");
   }
 
+  var browserProc = null;
   document.getElementById("btnLaunchChrome").onclick = function () {
-    var chromeExe = findChromeExe();
-    if (!chromeExe) return log("Google Chrome not found in standard paths.", "err");
     var targetUrl = (document.getElementById("chromeUrlInput").value || "https://pixopik.com").trim();
     if (!/^https?:\/\//i.test(targetUrl)) targetUrl = "https://" + targetUrl;
-    cp.spawn(chromeExe, ["--app=" + targetUrl], { detached: true, windowsHide: false });
-    log("Opened Clean Signed-In Chrome (Zero Extension/Bookmark bars)!", "ok");
+    if (browserProc && !browserProc.killed) {
+      try { browserProc.kill(); } catch (_e) {}
+    }
+    browserProc = spawnEncodedPowerShell("& " + psSingleQuote(BROWSER_SCRIPT) + " -StartUrl " + psSingleQuote(targetUrl));
+    browserProc.on("exit", function () { browserProc = null; });
+    log("Launched Clean Studio Browser (Tabs + URL Bar + Zero Clutter)!", "ok");
   };
 
   document.getElementById("btnGhostBar").onclick = function () {
     openGhostToolbar();
-  };
-
-  document.getElementById("btnCopyExtPath").onclick = function () {
-    try { cp.spawn("explorer.exe", [CHROME_EXT_DIR], { detached: true }); } catch (_e) {}
-    var chromeExe = findChromeExe();
-    if (chromeExe) {
-      try { cp.spawn(chromeExe, ["chrome://extensions/"], { detached: true }); } catch (_e2) {}
-    }
-    log("Opened extension folder! In Chrome Extensions -> Developer Mode ON -> Load unpacked -> select Pixopik_Chrome_Extension", "ok");
   };
 
   function loadExtendScripts(cb) {
@@ -178,8 +124,8 @@
 
   loadExtendScripts(function (res) {
     if (String(res).indexOf("OK") === 0) {
-      quickBanner.textContent = "v1.3 Ready • Clean Signed-In Chrome + Ghost Toolbar";
-      log("Studio Pro v1.3 engine loaded (Clean Chrome + Ghost Mode!)", "ok");
+      quickBanner.textContent = "v1.4 Ready • Clean Tabs + URL Browser + Ghost Bar";
+      log("Studio Pro v1.4 engine loaded (Clean Browser Tabs + Ghost Mode!)", "ok");
     } else {
       log("Engine init: " + res, "err");
     }
@@ -376,7 +322,7 @@
       if (!activeSession || sess._finalized) return;
       var diff = Math.floor((Date.now() - startEpoch) / 1000);
       if (diff < 0) {
-        recTimer.textContent = "Starting in " + Math.abs(diff) + "s • Switch to Clean Chrome!";
+        recTimer.textContent = "Starting in " + Math.abs(diff) + "s • Switch to Studio Browser!";
       } else {
         var sec = String(diff % 60).padStart(2, "0");
         var min = String(Math.floor(diff / 60)).padStart(2, "0");
@@ -478,7 +424,7 @@
     var url = (wsInput.value || "").trim();
     setStatus(false, "Connecting...");
     ws = new WebSocket(url);
-    ws.onopen = function () { setStatus(true, "Pro v1.3 Live"); log("Connected to Cloud MCP Relay!", "ok"); };
+    ws.onopen = function () { setStatus(true, "Pro v1.4 Live"); log("Connected to Cloud MCP Relay!", "ok"); };
     ws.onmessage = async function (ev) {
       var msg;
       try { msg = JSON.parse(ev.data); } catch (_e) { return; }
