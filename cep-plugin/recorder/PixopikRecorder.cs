@@ -37,7 +37,7 @@ public class PixopikRecorderApp : Form {
 
   Label lblTimer, lblSub, lblFooter;
   Button btnRec, btnPause;
-  ComboBox cmbMode, cmbCam, cmbZoom, cmbDead, cmbPreset, cmbAspect, cmbBg, cmbWin;
+  ComboBox cmbMode, cmbCam, cmbZoom, cmbMinDist, cmbPreset, cmbAspect, cmbBg, cmbWin;
   CheckBox chkSfx, chkRip, chkAutoRig, chkHideOnRec;
   Panel paneHome, paneVideos, paneImages, paneAe;
   ListBox lstVideos, lstImages;
@@ -56,7 +56,7 @@ public class PixopikRecorderApp : Form {
     bdDataDir  = Directory.Exists(@"C:\Program Files\Bandicam\data") ? @"C:\Program Files\Bandicam\data" : @"C:\Program Files (x86)\Bandicam\data";
     ffmpegExe  = FindFfmpegSafe();
 
-    Text = "Pixopik Screen Recorder Pro v3.3";
+    Text = "Pixopik Screen Recorder Pro v3.4";
     ClientSize = new Size(860, 520);
     MinimumSize = new Size(780, 480);
     StartPosition = FormStartPosition.CenterScreen;
@@ -65,9 +65,9 @@ public class PixopikRecorderApp : Form {
     Font = new Font("Segoe UI", 9.0f);
 
     BuildBandicamUI();
-    RegisterHotKey(Handle, 9001, 0, 0x7B); // F12 = REC / STOP
-    RegisterHotKey(Handle, 9002, 4, 0x7B); // Shift+F12 = PAUSE
-    RegisterHotKey(Handle, 9003, 0, 0x7A); // F11 = SCREENSHOT
+    RegisterHotKey(Handle, 9001, 0, 0x7B);
+    RegisterHotKey(Handle, 9002, 4, 0x7B);
+    RegisterHotKey(Handle, 9003, 0, 0x7A);
 
     tickTimer.Interval = 28;
     tickTimer.Tick += OnCaptureTick;
@@ -95,7 +95,6 @@ public class PixopikRecorderApp : Form {
     string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
     string linkExe = Path.Combine(localApp, @"Microsoft\WinGet\Links\ffmpeg.exe");
     if (File.Exists(linkExe)) return linkExe;
-
     string wg = Path.Combine(localApp, @"Microsoft\WinGet\Packages");
     if (Directory.Exists(wg)) {
       foreach (var pkg in Directory.GetDirectories(wg)) {
@@ -106,34 +105,21 @@ public class PixopikRecorderApp : Form {
       }
     }
     foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';')) {
-      try {
-        if (!string.IsNullOrWhiteSpace(dir)) {
-          string p = Path.Combine(dir.Trim(), "ffmpeg.exe");
-          if (File.Exists(p)) return p;
-        }
-      } catch {}
+      try { if (!string.IsNullOrWhiteSpace(dir)) { string p = Path.Combine(dir.Trim(), "ffmpeg.exe"); if (File.Exists(p)) return p; } } catch {}
     }
-    foreach (var c in new[] { @"C:\ffmpeg\bin\ffmpeg.exe", @"C:\Program Files\ffmpeg\bin\ffmpeg.exe" }) {
-      if (File.Exists(c)) return c;
-    }
+    foreach (var c in new[] { @"C:\ffmpeg\bin\ffmpeg.exe", @"C:\Program Files\ffmpeg\bin\ffmpeg.exe" }) if (File.Exists(c)) return c;
     return "";
   }
 
   void NotifyAeInstant(string action, string sessionDir) {
     try {
-      if (action == "auto_rig" && !string.IsNullOrEmpty(sessionDir)) {
-        File.WriteAllText(signalFile, sessionDir, new UTF8Encoding(false));
-      } else {
-        File.WriteAllText(Path.Combine(recRoot, "native_cmd.txt"), action, new UTF8Encoding(false));
-      }
+      if (action == "auto_rig" && !string.IsNullOrEmpty(sessionDir)) File.WriteAllText(signalFile, sessionDir, new UTF8Encoding(false));
+      else File.WriteAllText(Path.Combine(recRoot, "native_cmd.txt"), action, new UTF8Encoding(false));
       if (File.Exists(portFile)) {
-        string port = File.ReadAllText(portFile).Trim();
         int pNum;
-        if (int.TryParse(port, out pNum) && pNum > 0) {
+        if (int.TryParse(File.ReadAllText(portFile).Trim(), out pNum) && pNum > 0) {
           var req = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:" + pNum + "/bridge");
-          req.Method = "POST";
-          req.ContentType = "application/json";
-          req.Timeout = 1500;
+          req.Method = "POST"; req.ContentType = "application/json"; req.Timeout = 1500;
           string safeSess = (sessionDir ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
           byte[] bytes = Encoding.UTF8.GetBytes("{\"action\":\"" + action + "\",\"sessionDir\":\"" + safeSess + "\"}");
           req.ContentLength = bytes.Length;
@@ -149,9 +135,7 @@ public class PixopikRecorderApp : Form {
       foreach (var p in Process.GetProcesses()) {
         try {
           if (p.ProcessName.IndexOf("AfterFX", StringComparison.OrdinalIgnoreCase) >= 0 && p.MainWindowHandle != IntPtr.Zero) {
-            ShowWindow(p.MainWindowHandle, 9); // SW_RESTORE
-            SetForegroundWindow(p.MainWindowHandle);
-            break;
+            ShowWindow(p.MainWindowHandle, 9); SetForegroundWindow(p.MainWindowHandle); break;
           }
         } catch {}
       }
@@ -161,69 +145,36 @@ public class PixopikRecorderApp : Form {
   void BuildBandicamUI() {
     Panel top = new Panel { Dock = DockStyle.Top, Height = 68, BackColor = Color.FromArgb(16, 20, 29), Padding = new Padding(12, 10, 12, 10) };
 
-    FlowLayoutPanel rightCluster = new FlowLayoutPanel {
-      Dock = DockStyle.Right, AutoSize = true, WrapContents = false,
-      FlowDirection = FlowDirection.LeftToRight, BackColor = Color.Transparent
-    };
-
+    FlowLayoutPanel rightCluster = new FlowLayoutPanel { Dock = DockStyle.Right, AutoSize = true, WrapContents = false };
     Panel timerStack = new Panel { Width = 185, Height = 48 };
     lblTimer = new Label { Text = "00:00:00", Dock = DockStyle.Top, Height = 28, TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, Font = new Font("Consolas", 14.0f, FontStyle.Bold) };
     lblSub   = new Label { Text = "F12: REC/Stop • F11: Shot", Dock = DockStyle.Bottom, Height = 18, TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.FromArgb(56, 189, 248), Font = new Font("Segoe UI", 7.8f, FontStyle.Bold) };
     timerStack.Controls.Add(lblTimer); timerStack.Controls.Add(lblSub);
 
     btnPause = new Button { Text = "⏸", Width = 44, Height = 44, Margin = new Padding(6, 2, 4, 0), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(30, 38, 54), ForeColor = Color.White, Cursor = Cursors.Hand };
-    btnPause.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
     btnPause.Click += (s, e) => TogglePause();
 
-    btnRec = new Button {
-      Text = "● REC", Width = 92, Height = 44, Margin = new Padding(4, 2, 4, 0),
-      FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(225, 29, 72), ForeColor = Color.White,
-      Font = new Font("Segoe UI", 10.0f, FontStyle.Bold), Cursor = Cursors.Hand
-    };
-    btnRec.FlatAppearance.BorderColor = Color.FromArgb(253, 164, 175);
+    btnRec = new Button { Text = "● REC", Width = 92, Height = 44, Margin = new Padding(4, 2, 4, 0), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(225, 29, 72), ForeColor = Color.White, Font = new Font("Segoe UI", 10.0f, FontStyle.Bold), Cursor = Cursors.Hand };
     btnRec.Click += (s, e) => ToggleRecord();
 
     Button btnShot = new Button { Text = "📷", Width = 44, Height = 44, Margin = new Padding(4, 2, 0, 0), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(30, 38, 54), ForeColor = Color.White, Cursor = Cursors.Hand };
-    btnShot.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
     btnShot.Click += (s, e) => TakeScreenshot();
-
     rightCluster.Controls.AddRange(new Control[] { timerStack, btnPause, btnRec, btnShot });
 
-    FlowLayoutPanel leftCluster = new FlowLayoutPanel {
-      Dock = DockStyle.Left, AutoSize = true, WrapContents = false,
-      FlowDirection = FlowDirection.LeftToRight, BackColor = Color.Transparent
-    };
-
-    cmbMode = new ComboBox {
-      Width = 220, Margin = new Padding(0, 8, 8, 0), DropDownStyle = ComboBoxStyle.DropDownList,
-      BackColor = Color.FromArgb(30, 38, 54), ForeColor = Color.FromArgb(56, 189, 248),
-      Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), FlatStyle = FlatStyle.Flat
-    };
-    cmbMode.Items.AddRange(new object[] {
-      "⛶  Fullscreen (Display 1)",
-      "▭  Rectangle on a screen",
-      "✛  Select a recording area",
-      "🗔  Specific window",
-      "🖱️  Around mouse (1280x720)"
-    });
+    FlowLayoutPanel leftCluster = new FlowLayoutPanel { Dock = DockStyle.Left, AutoSize = true, WrapContents = false };
+    cmbMode = new ComboBox { Width = 220, Margin = new Padding(0, 8, 8, 0), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(30, 38, 54), ForeColor = Color.FromArgb(56, 189, 248), Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), FlatStyle = FlatStyle.Flat };
+    cmbMode.Items.AddRange(new object[] { "⛶  Fullscreen (Display 1)", "▭  Rectangle on a screen", "✛  Select a recording area", "🗔  Specific window", "🖱️  Around mouse (1280x720)" });
     cmbMode.SelectedIndex = 0;
     cmbMode.SelectedIndexChanged += (s, e) => OnModeChanged();
 
     Button btnDraw = new Button { Text = "✏️ Draw", Width = 74, Height = 38, Margin = new Padding(2, 5, 4, 0), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(30, 38, 54), ForeColor = Color.White, Cursor = Cursors.Hand };
     btnDraw.Click += (s, e) => NotifyAeInstant("OPEN_GHOST", "");
-
     Button btnChr = new Button { Text = "🧼 Chrome", Width = 84, Height = 38, Margin = new Padding(2, 5, 0, 0), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(30, 38, 54), ForeColor = Color.White, Cursor = Cursors.Hand };
     btnChr.Click += (s, e) => NotifyAeInstant("OPEN_CHROME", "");
-
     leftCluster.Controls.AddRange(new Control[] { cmbMode, btnDraw, btnChr });
-    top.Controls.Add(rightCluster);
-    top.Controls.Add(leftCluster);
+    top.Controls.Add(rightCluster); top.Controls.Add(leftCluster);
 
-    lblFooter = new Label {
-      Dock = DockStyle.Bottom, Height = 28, BackColor = Color.FromArgb(14, 18, 26),
-      ForeColor = Color.FromArgb(148, 163, 184), TextAlign = ContentAlignment.MiddleLeft,
-      Text = "  Instant AE Socket Bridge v3.3  •  Stop (F12) Auto-Opens Composition in After Effects!"
-    };
+    lblFooter = new Label { Dock = DockStyle.Bottom, Height = 28, BackColor = Color.FromArgb(14, 18, 26), ForeColor = Color.FromArgb(148, 163, 184), TextAlign = ContentAlignment.MiddleLeft, Text = "  v3.4 Distance-Locked Dolly Engine  •  Moves below Min Distance = 0% Camera Drift!" };
 
     Panel nav = new Panel { Dock = DockStyle.Left, Width = 170, BackColor = Color.FromArgb(19, 24, 34), Padding = new Padding(8, 12, 8, 12) };
     FlowLayoutPanel navFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
@@ -232,7 +183,6 @@ public class PixopikRecorderApp : Form {
     Button bImgs = MakeNav("🖼️  Images");
     Button bAe   = MakeNav("🎥  AE & Wallpapers");
     Button bOpen = MakeNav("📂  Output Folder");
-
     bHome.Click += (s, e) => ShowPane(paneHome);
     bVids.Click += (s, e) => { RefreshMediaLists(); ShowPane(paneVideos); };
     bImgs.Click += (s, e) => { RefreshMediaLists(); ShowPane(paneImages); };
@@ -241,46 +191,46 @@ public class PixopikRecorderApp : Form {
     navFlow.Controls.AddRange(new Control[] { bHome, bVids, bImgs, bAe, bOpen });
 
     chkHideOnRec = new CheckBox { Text = "Minimize on REC", Checked = true, Dock = DockStyle.Bottom, Height = 28, ForeColor = Color.FromArgb(165, 180, 205) };
-    nav.Controls.Add(navFlow);
-    nav.Controls.Add(chkHideOnRec);
+    nav.Controls.Add(navFlow); nav.Controls.Add(chkHideOnRec);
 
     Panel body = new Panel { Dock = DockStyle.Fill, Padding = new Padding(16) };
 
     paneHome = new Panel { Dock = DockStyle.Fill };
-    TableLayoutPanel cardsGrid = new TableLayoutPanel { Dock = DockStyle.Top, Height = 122, ColumnCount = 4, RowCount = 1 };
+    TableLayoutPanel cardsGrid = new TableLayoutPanel { Dock = DockStyle.Top, Height = 118, ColumnCount = 4, RowCount = 1 };
     for (int c = 0; c < 4; c++) cardsGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
     cardsGrid.Controls.Add(MakeCard("✛ Select Area", "Drag crosshair box", () => { cmbMode.SelectedIndex = 2; PickCrosshairArea(); }), 0, 0);
     cardsGrid.Controls.Add(MakeCard("▭ Rectangle Bar", "Floating target frame", () => { cmbMode.SelectedIndex = 1; ShowHollowFrame(); }), 1, 0);
     cardsGrid.Controls.Add(MakeCard("⛶ Fullscreen", "Entire monitor 60fps", () => { cmbMode.SelectedIndex = 0; }), 2, 0);
     cardsGrid.Controls.Add(MakeCard("🖱️ Around Mouse", "Follow cursor 1280x720", () => { cmbMode.SelectedIndex = 4; }), 3, 0);
 
-    Panel winPanel = new Panel { Dock = DockStyle.Top, Height = 82, BackColor = Color.FromArgb(18, 23, 33), Padding = new Padding(12, 8, 12, 8) };
-    Label lWin = new Label { Text = "🗔 SPECIFIC WINDOW TARGET (Select Window Mode):", Dock = DockStyle.Top, Height = 20, ForeColor = Color.FromArgb(148, 163, 184), Font = new Font("Segoe UI", 8.2f, FontStyle.Bold) };
-    Panel winRow = new Panel { Dock = DockStyle.Top, Height = 34 };
+    Panel winPanel = new Panel { Dock = DockStyle.Top, Height = 78, BackColor = Color.FromArgb(18, 23, 33), Padding = new Padding(12, 6, 12, 6) };
+    Label lWin = new Label { Text = "🗔 SPECIFIC WINDOW TARGET:", Dock = DockStyle.Top, Height = 20, ForeColor = Color.FromArgb(148, 163, 184), Font = new Font("Segoe UI", 8.2f, FontStyle.Bold) };
+    Panel winRow = new Panel { Dock = DockStyle.Top, Height = 32 };
     Button bRefW = new Button { Text = "↻ Refresh", Dock = DockStyle.Right, Width = 100, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(2, 132, 199), ForeColor = Color.White };
     bRefW.Click += (s, e) => RefreshWindows();
     cmbWin = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(30, 38, 54), ForeColor = Color.White };
     winRow.Controls.Add(cmbWin); winRow.Controls.Add(bRefW);
     winPanel.Controls.Add(winRow); winPanel.Controls.Add(lWin);
 
-    Panel camPanel = new Panel { Dock = DockStyle.Top, Height = 112, BackColor = Color.FromArgb(18, 23, 33), Padding = new Padding(12, 10, 12, 8) };
-    Label lCam = new Label { Text = "🎥 AFTER EFFECTS AUTO-RIG & ZERO-SHAKE CAMERA:", Dock = DockStyle.Top, Height = 22, ForeColor = Color.FromArgb(56, 189, 248), Font = new Font("Segoe UI", 8.6f, FontStyle.Bold) };
+    Panel camPanel = new Panel { Dock = DockStyle.Top, Height = 122, BackColor = Color.FromArgb(18, 23, 33), Padding = new Padding(12, 8, 12, 8) };
+    Label lCam = new Label { Text = "🎥 TRAVEL DOLLY MINIMUM DISTANCE LOCK (BELOW DISTANCE = 0% DOLLY):", Dock = DockStyle.Top, Height = 22, ForeColor = Color.FromArgb(56, 189, 248), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };
     FlowLayoutPanel camRow1 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 38, WrapContents = false };
-    cmbCam = MakeCombo(new[] { "🎥 Pro Dolly Travel (65% Safe-Box, Zero Shake)", "🎯 Classic Click Zoom In / Out", "📌 Static Locked Camera (0% Move)" }, 0, 310);
-    cmbZoom = MakeCombo(new[] { "135% Gentle", "150% Balanced", "175% Close-Up" }, 1, 135);
-    chkAutoRig = new CheckBox { Text = "⚡ Auto-Rig AE", Checked = true, AutoSize = true, Margin = new Padding(10, 6, 0, 0), ForeColor = Color.White };
-    camRow1.Controls.AddRange(new Control[] { cmbCam, cmbZoom, chkAutoRig });
+    cmbCam = MakeCombo(new[] { "🎥 Travel Dolly (Distance-Locked)", "🎯 Classic Click Zoom In/Out", "📌 Static Locked (0% Move)" }, 0, 225);
+    cmbMinDist = MakeCombo(new[] { "📏 Min 350 px", "📏 Min 550 px (Pro)", "📏 Min 800 px (Wide)", "📏 Min 1050 px" }, 1, 165);
+    cmbZoom = MakeCombo(new[] { "135% Zoom", "145% Balanced", "170% Close" }, 1, 125);
+    camRow1.Controls.AddRange(new Control[] { cmbCam, cmbMinDist, cmbZoom });
 
     FlowLayoutPanel camRow2 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 32, WrapContents = false };
-    chkSfx = new CheckBox { Text = "🔊 Bandicam Click Sounds (lclick/rclick.wav)", Checked = true, AutoSize = true, ForeColor = Color.FromArgb(203, 213, 225) };
-    chkRip = new CheckBox { Text = "💫 Vector Cursor + Click Ripples", Checked = true, AutoSize = true, Margin = new Padding(18, 3, 0, 0), ForeColor = Color.FromArgb(203, 213, 225) };
-    camRow2.Controls.AddRange(new Control[] { chkSfx, chkRip });
+    chkAutoRig = new CheckBox { Text = "⚡ Auto-Rig AE on Stop", Checked = true, AutoSize = true, ForeColor = Color.White };
+    chkSfx = new CheckBox { Text = "🔊 Click SFX", Checked = true, AutoSize = true, Margin = new Padding(16, 3, 0, 0), ForeColor = Color.FromArgb(203, 213, 225) };
+    chkRip = new CheckBox { Text = "💫 Click Ripples", Checked = true, AutoSize = true, Margin = new Padding(16, 3, 0, 0), ForeColor = Color.FromArgb(203, 213, 225) };
+    camRow2.Controls.AddRange(new Control[] { chkAutoRig, chkSfx, chkRip });
     camPanel.Controls.Add(camRow2); camPanel.Controls.Add(camRow1); camPanel.Controls.Add(lCam);
 
     paneHome.Controls.Add(camPanel);
-    paneHome.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 10 });
+    paneHome.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 8 });
     paneHome.Controls.Add(winPanel);
-    paneHome.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 10 });
+    paneHome.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 8 });
     paneHome.Controls.Add(cardsGrid);
 
     paneVideos = new Panel { Dock = DockStyle.Fill, Visible = false };
@@ -293,8 +243,7 @@ public class PixopikRecorderApp : Form {
       if (lstVideos.SelectedItem != null) {
         SavePrefsJson();
         string dir = Path.Combine(recRoot, lstVideos.SelectedItem.ToString().Split('|')[0].Trim());
-        NotifyAeInstant("auto_rig", dir);
-        BringAfterEffectsToFront();
+        NotifyAeInstant("auto_rig", dir); BringAfterEffectsToFront();
       }
     };
     vidBtns.Controls.AddRange(new Control[] { bPlayVid, bRigVid });
@@ -306,11 +255,7 @@ public class PixopikRecorderApp : Form {
 
     paneAe = new Panel { Dock = DockStyle.Fill, Visible = false };
     FlowLayoutPanel aeStack = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
-    aeStack.Controls.Add(new Label { Text = "ANTI-SHAKE SAFE-ZONE BOX:", AutoSize = true, ForeColor = Color.FromArgb(56, 189, 248), Font = new Font("Segoe UI", 9f, FontStyle.Bold) });
-    cmbDead = MakeCombo(new[] { "🛡️ Strict 65% Safe-Box (Zero Hover Drift)", "⚖️ Medium 45% Safe-Box", "🎯 Pan Every Click" }, 0, 420);
-    aeStack.Controls.Add(cmbDead);
-
-    aeStack.Controls.Add(new Label { Text = "AFTER EFFECTS LAYOUT & ASPECT:", AutoSize = true, Margin = new Padding(0, 12, 0, 0), ForeColor = Color.FromArgb(56, 189, 248), Font = new Font("Segoe UI", 9f, FontStyle.Bold) });
+    aeStack.Controls.Add(new Label { Text = "AFTER EFFECTS LAYOUT & ASPECT:", AutoSize = true, ForeColor = Color.FromArgb(56, 189, 248), Font = new Font("Segoe UI", 9f, FontStyle.Bold) });
     cmbPreset = MakeCombo(new[] { "🎓 YouTube Tutorial (95% Big Screen)", "🚀 SaaS Promo (84% macOS Glass)" }, 0, 420);
     cmbAspect = MakeCombo(new[] { "16:9 YouTube (1920x1080)", "9:16 Vertical Shorts (1080x1920)", "1:1 Square" }, 0, 420);
     aeStack.Controls.Add(cmbPreset); aeStack.Controls.Add(cmbAspect);
@@ -328,51 +273,37 @@ public class PixopikRecorderApp : Form {
     paneAe.Controls.Add(aeStack);
 
     body.Controls.AddRange(new Control[] { paneHome, paneVideos, paneImages, paneAe });
-    Controls.Add(body);
-    Controls.Add(nav);
-    Controls.Add(lblFooter);
-    Controls.Add(top);
-
+    Controls.Add(body); Controls.Add(nav); Controls.Add(lblFooter); Controls.Add(top);
     RefreshWindows();
   }
 
   void ShowPane(Panel target) {
-    paneHome.Visible = (target == paneHome);
-    paneVideos.Visible = (target == paneVideos);
-    paneImages.Visible = (target == paneImages);
-    paneAe.Visible = (target == paneAe);
+    paneHome.Visible = (target == paneHome); paneVideos.Visible = (target == paneVideos);
+    paneImages.Visible = (target == paneImages); paneAe.Visible = (target == paneAe);
   }
 
   Button MakeNav(string txt) {
     var b = new Button { Text = txt, Width = 152, Height = 38, Margin = new Padding(0, 0, 0, 4), FlatStyle = FlatStyle.Flat, TextAlign = ContentAlignment.MiddleLeft, BackColor = Color.Transparent, ForeColor = Color.FromArgb(203, 213, 225), Cursor = Cursors.Hand };
-    b.FlatAppearance.BorderSize = 0;
-    return b;
+    b.FlatAppearance.BorderSize = 0; return b;
   }
 
   ComboBox MakeCombo(string[] items, int sel, int w) {
     var c = new ComboBox { Width = w, DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(30, 38, 54), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
-    c.Items.AddRange(items); c.SelectedIndex = sel;
-    return c;
+    c.Items.AddRange(items); c.SelectedIndex = sel; return c;
   }
 
   Panel MakeCard(string title, string sub, Action onClick) {
     var p = new Panel { Dock = DockStyle.Fill, Margin = new Padding(5), BackColor = Color.FromArgb(33, 42, 58), Cursor = Cursors.Hand };
-    var l1 = new Label { Text = title, Dock = DockStyle.Top, Height = 52, TextAlign = ContentAlignment.BottomCenter, ForeColor = Color.White, Font = new Font("Segoe UI", 10.0f, FontStyle.Bold), Cursor = Cursors.Hand };
+    var l1 = new Label { Text = title, Dock = DockStyle.Top, Height = 50, TextAlign = ContentAlignment.BottomCenter, ForeColor = Color.White, Font = new Font("Segoe UI", 10.0f, FontStyle.Bold), Cursor = Cursors.Hand };
     var l2 = new Label { Text = sub, Dock = DockStyle.Fill, TextAlign = ContentAlignment.TopCenter, Padding = new Padding(4, 6, 4, 0), ForeColor = Color.FromArgb(148, 163, 184), Font = new Font("Segoe UI", 8.2f), Cursor = Cursors.Hand };
-    EventHandler h = (s, e) => onClick();
-    p.Click += h; l1.Click += h; l2.Click += h;
-    p.Controls.Add(l2); p.Controls.Add(l1);
-    return p;
+    EventHandler h = (s, e) => onClick(); p.Click += h; l1.Click += h; l2.Click += h;
+    p.Controls.Add(l2); p.Controls.Add(l1); return p;
   }
 
   void RefreshWindows() {
     cmbWin.Items.Clear();
     foreach (var p in Process.GetProcesses()) {
-      try {
-        if (!string.IsNullOrWhiteSpace(p.MainWindowTitle) && !p.MainWindowTitle.Contains("Pixopik Screen Recorder")) {
-          cmbWin.Items.Add(p.Id + " | " + p.MainWindowTitle);
-        }
-      } catch {}
+      try { if (!string.IsNullOrWhiteSpace(p.MainWindowTitle) && !p.MainWindowTitle.Contains("Pixopik Screen Recorder")) cmbWin.Items.Add(p.Id + " | " + p.MainWindowTitle); } catch {}
     }
     if (cmbWin.Items.Count > 0) cmbWin.SelectedIndex = 0;
   }
@@ -385,35 +316,23 @@ public class PixopikRecorderApp : Form {
       string mp4 = Path.Combine(d, "screen.mp4");
       if (File.Exists(mp4)) {
         var fi = new FileInfo(mp4);
-        lstVideos.Items.Add(Path.GetFileName(d) + "  |  " + (fi.Length / 1024 / 1024.0).ToString("0.1") + " MB  |  " + fi.LastWriteTime.ToShortTimeString());
+        lstVideos.Items.Add(Path.GetFileName(d) + "  |  " + (fi.Length / 1048576.0).ToString("0.1") + " MB  |  " + fi.LastWriteTime.ToShortTimeString());
       }
     }
     if (lstVideos.Items.Count > 0) lstVideos.SelectedIndex = 0;
-
     lstImages.Items.Clear();
-    foreach (var img in Directory.GetFiles(Path.Combine(recRoot, "Screenshots"), "*.png")) {
-      lstImages.Items.Add(Path.GetFileName(img));
-    }
+    foreach (var img in Directory.GetFiles(Path.Combine(recRoot, "Screenshots"), "*.png")) lstImages.Items.Add(Path.GetFileName(img));
   }
 
   void OnModeChanged() {
     string[] modes = { "fullscreen", "rectangle", "select_area", "specific_window", "around_mouse" };
     capMode = modes[cmbMode.SelectedIndex];
-    if (capMode == "rectangle") ShowHollowFrame();
-    else if (rectFrame != null && !rectFrame.IsDisposed) rectFrame.Hide();
+    if (capMode == "rectangle") ShowHollowFrame(); else if (rectFrame != null && !rectFrame.IsDisposed) rectFrame.Hide();
     if (capMode == "specific_window") RefreshWindows();
   }
 
-  void ShowHollowFrame() {
-    if (rectFrame == null || rectFrame.IsDisposed) rectFrame = new HollowFrameForm(this);
-    rectFrame.Show();
-  }
-
-  public void UpdateRectFromFrame(Rectangle r) {
-    cropX = Math.Max(0, r.X); cropY = Math.Max(0, r.Y);
-    cropW = (r.Width / 2) * 2; cropH = (r.Height / 2) * 2;
-    lblSub.Text = cropW + "x" + cropH + " Frame Ready";
-  }
+  void ShowHollowFrame() { if (rectFrame == null || rectFrame.IsDisposed) rectFrame = new HollowFrameForm(this); rectFrame.Show(); }
+  public void UpdateRectFromFrame(Rectangle r) { cropX = Math.Max(0, r.X); cropY = Math.Max(0, r.Y); cropW = (r.Width / 2) * 2; cropH = (r.Height / 2) * 2; lblSub.Text = cropW + "x" + cropH + " Frame Ready"; }
 
   void PickCrosshairArea() {
     Hide();
@@ -425,83 +344,48 @@ public class PixopikRecorderApp : Form {
       ov.Paint += (s, e) => { if (rc.Width > 4) e.Graphics.DrawRectangle(new Pen(Color.FromArgb(244, 63, 94), 3), rc); };
       ov.ShowDialog();
     }
-    Show();
-    lblSub.Text = "Area: " + cropW + "x" + cropH;
+    Show(); lblSub.Text = "Area: " + cropW + "x" + cropH;
   }
 
-  public void ToggleRecord() {
-    if (!isRecording) StartRecording();
-    else StopRecording();
-  }
-
-  public void TogglePause() {
-    if (!isRecording) return;
-    isPaused = !isPaused;
-    lblSub.Text = isPaused ? "⏸ PAUSED (Shift+F12)" : "● REC LIVE 60 FPS";
-  }
+  public void ToggleRecord() { if (!isRecording) StartRecording(); else StopRecording(); }
+  public void TogglePause() { if (!isRecording) return; isPaused = !isPaused; lblSub.Text = isPaused ? "⏸ PAUSED (Shift+F12)" : "● REC LIVE 60 FPS"; }
 
   public void TakeScreenshot() {
     try {
       var b = Screen.PrimaryScreen.Bounds;
       string fn = Path.Combine(recRoot, "Screenshots", "shot_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".png");
-      using (var bmp = new Bitmap(b.Width, b.Height))
-      using (var g = Graphics.FromImage(bmp)) {
-        g.CopyFromScreen(0, 0, 0, 0, bmp.Size);
-        bmp.Save(fn);
-      }
-      PlayWav(Path.Combine(bdDataDir, "camera.wav"));
-      lblSub.Text = "📷 Saved Screenshot!";
+      using (var bmp = new Bitmap(b.Width, b.Height)) using (var g = Graphics.FromImage(bmp)) { g.CopyFromScreen(0, 0, 0, 0, bmp.Size); bmp.Save(fn); }
+      PlayWav(Path.Combine(bdDataDir, "camera.wav")); lblSub.Text = "📷 Saved Screenshot!";
     } catch {}
   }
 
-  void PlayWav(string p) {
-    try { if (File.Exists(p)) new System.Media.SoundPlayer(p).Play(); } catch {}
-  }
+  void PlayWav(string p) { try { if (File.Exists(p)) new System.Media.SoundPlayer(p).Play(); } catch {} }
 
   void StartRecording() {
     try {
       if (string.IsNullOrEmpty(ffmpegExe) || !File.Exists(ffmpegExe)) {
         ffmpegExe = FindFfmpegSafe();
-        if (string.IsNullOrEmpty(ffmpegExe)) {
-          MessageBox.Show("FFmpeg not found! Click Auto-Install FFmpeg in AE panel first.", "Pixopik Recorder");
-          return;
-        }
+        if (string.IsNullOrEmpty(ffmpegExe)) { MessageBox.Show("FFmpeg not found!", "Pixopik Recorder"); return; }
       }
 
       Rectangle sb = Screen.PrimaryScreen.Bounds;
-      int rx = 0, ry = 0, rw = sb.Width, rh = sb.Height;
-      bool useCrop = false;
+      int rx = 0, ry = 0, rw = sb.Width, rh = sb.Height; bool useCrop = false;
 
       if (capMode == "rectangle" && rectFrame != null && !rectFrame.IsDisposed) {
-        Rectangle fr = rectFrame.GetInnerScreenRect();
-        rx = fr.X; ry = fr.Y; rw = fr.Width; rh = fr.Height; useCrop = true;
-        rectFrame.SetRecState(true);
-      } else if (capMode == "select_area") {
-        rx = cropX; ry = cropY; rw = cropW; rh = cropH; useCrop = true;
-      } else if (capMode == "specific_window" && cmbWin.SelectedItem != null) {
+        Rectangle fr = rectFrame.GetInnerScreenRect(); rx = fr.X; ry = fr.Y; rw = fr.Width; rh = fr.Height; useCrop = true; rectFrame.SetRecState(true);
+      } else if (capMode == "select_area") { rx = cropX; ry = cropY; rw = cropW; rh = cropH; useCrop = true; }
+      else if (capMode == "specific_window" && cmbWin.SelectedItem != null) {
         int pid = int.Parse(cmbWin.SelectedItem.ToString().Split('|')[0].Trim());
         try {
-          var wp = Process.GetProcessById(pid);
-          SetForegroundWindow(wp.MainWindowHandle);
-          System.Threading.Thread.Sleep(150);
-          RECT wr;
-          if (GetWindowRect(wp.MainWindowHandle, out wr)) {
-            rx = Math.Max(0, wr.Left + 7); ry = Math.Max(0, wr.Top);
-            rw = (wr.Right - wr.Left) - 14; rh = (wr.Bottom - wr.Top) - 7; useCrop = true;
-          }
+          var wp = Process.GetProcessById(pid); SetForegroundWindow(wp.MainWindowHandle); System.Threading.Thread.Sleep(150);
+          RECT wr; if (GetWindowRect(wp.MainWindowHandle, out wr)) { rx = Math.Max(0, wr.Left + 7); ry = Math.Max(0, wr.Top); rw = (wr.Right - wr.Left) - 14; rh = (wr.Bottom - wr.Top) - 7; useCrop = true; }
         } catch {}
       }
 
       if (useCrop) {
-        rx = Math.Max(0, Math.Min(sb.Width - 80, rx));
-        ry = Math.Max(0, Math.Min(sb.Height - 80, ry));
-        rw = Math.Min(sb.Width - rx, Math.Max(80, (rw / 2) * 2));
-        rh = Math.Min(sb.Height - ry, Math.Max(80, (rh / 2) * 2));
-      } else {
-        rx = 0; ry = 0;
-        rw = (sb.Width / 2) * 2;
-        rh = (sb.Height / 2) * 2;
-      }
+        rx = Math.Max(0, Math.Min(sb.Width - 80, rx)); ry = Math.Max(0, Math.Min(sb.Height - 80, ry));
+        rw = Math.Min(sb.Width - rx, Math.Max(80, (rw / 2) * 2)); rh = Math.Min(sb.Height - ry, Math.Max(80, (rh / 2) * 2));
+      } else { rx = 0; ry = 0; rw = (sb.Width / 2) * 2; rh = (sb.Height / 2) * 2; }
       cropX = rx; cropY = ry; cropW = rw; cropH = rh;
 
       SavePrefsJson();
@@ -509,10 +393,7 @@ public class PixopikRecorderApp : Form {
       Directory.CreateDirectory(curSessDir);
       curMp4Path = Path.Combine(curSessDir, "screen.mp4");
 
-      string vf = useCrop
-        ? string.Format("crop={0}:{1}:{2}:{3},scale=trunc(iw/2)*2:trunc(ih/2)*2", rw, rh, rx, ry)
-        : "scale=trunc(iw/2)*2:trunc(ih/2)*2";
-
+      string vf = useCrop ? string.Format("crop={0}:{1}:{2}:{3},scale=trunc(iw/2)*2:trunc(ih/2)*2", rw, rh, rx, ry) : "scale=trunc(iw/2)*2:trunc(ih/2)*2";
       var errSb = new StringBuilder();
       var psi = new ProcessStartInfo {
         FileName = ffmpegExe,
@@ -522,33 +403,22 @@ public class PixopikRecorderApp : Form {
 
       ffProc = new Process { StartInfo = psi };
       ffProc.ErrorDataReceived += (s, ev) => { if (ev.Data != null) errSb.AppendLine(ev.Data); };
-      ffProc.Start();
-      ffProc.BeginErrorReadLine();
+      ffProc.Start(); ffProc.BeginErrorReadLine();
 
       System.Threading.Thread.Sleep(550);
-      if (ffProc.HasExited) {
-        MessageBox.Show("FFmpeg exited early:\n" + errSb.ToString(), "Pixopik Recorder Error");
-        return;
-      }
+      if (ffProc.HasExited) { MessageBox.Show("FFmpeg exited early:\n" + errSb.ToString(), "Pixopik Recorder"); return; }
 
       PlayWav(Path.Combine(bdDataDir, "start.wav"));
-
-      sampleJson.Clear(); clickJson.Clear();
-      wasL = false; wasR = false; isPaused = false; isRecording = true;
+      sampleJson.Clear(); clickJson.Clear(); wasL = false; wasR = false; isPaused = false; isRecording = true;
       btnRec.Text = "■ STOP"; btnRec.BackColor = Color.FromArgb(185, 28, 28);
       lblSub.Text = "● REC " + rw + "x" + rh + " (F12 Stop)";
 
       if (chkHideOnRec.Checked && capMode != "rectangle") {
         if (miniBar == null || miniBar.IsDisposed) miniBar = new MiniGhostBar(this);
-        miniBar.Show();
-        WindowState = FormWindowState.Minimized;
+        miniBar.Show(); WindowState = FormWindowState.Minimized;
       }
-
-      recSw.Restart();
-      tickTimer.Start();
-    } catch (Exception ex) {
-      MessageBox.Show("Start Error:\n" + ex.Message, "Pixopik Recorder");
-    }
+      recSw.Restart(); tickTimer.Start();
+    } catch (Exception ex) { MessageBox.Show("Start Error:\n" + ex.Message, "Pixopik Recorder"); }
   }
 
   void OnCaptureTick(object sender, EventArgs e) {
@@ -561,22 +431,17 @@ public class PixopikRecorderApp : Form {
     lblTimer.Text = tStr;
 
     string mbTxt = "";
-    if (((int)(t * 10)) % 10 == 0 && File.Exists(curMp4Path)) {
-      try { mbTxt = " • " + (new FileInfo(curMp4Path).Length / 1048576.0).ToString("0.1") + " MB"; } catch {}
-    }
+    if (((int)(t * 10)) % 10 == 0 && File.Exists(curMp4Path)) { try { mbTxt = " • " + (new FileInfo(curMp4Path).Length / 1048576.0).ToString("0.1") + " MB"; } catch {} }
     if (rectFrame != null && !rectFrame.IsDisposed && rectFrame.Visible) rectFrame.UpdateTimerText(tStr + mbTxt);
     if (miniBar != null && !miniBar.IsDisposed && miniBar.Visible) miniBar.UpdateTimer(tStr, cropW + "x" + cropH + mbTxt);
 
     Point p = Cursor.Position;
-    int rx = Math.Max(0, Math.Min(cropW, p.X - cropX));
-    int ry = Math.Max(0, Math.Min(cropH, p.Y - cropY));
+    int rx = Math.Max(0, Math.Min(cropW, p.X - cropX)), ry = Math.Max(0, Math.Min(cropH, p.Y - cropY));
     bool inside = (p.X >= cropX && p.X <= cropX + cropW && p.Y >= cropY && p.Y <= cropY + cropH);
-
     string tsInv = t.ToString(CultureInfo.InvariantCulture);
     sampleJson.Add("{\"t\":" + tsInv + ",\"x\":" + rx + ",\"y\":" + ry + "}");
 
-    bool lDown = (Control.MouseButtons & MouseButtons.Left) != 0;
-    bool rDown = (Control.MouseButtons & MouseButtons.Right) != 0;
+    bool lDown = (Control.MouseButtons & MouseButtons.Left) != 0, rDown = (Control.MouseButtons & MouseButtons.Right) != 0;
     if (inside) {
       if (lDown && !wasL) clickJson.Add("{\"t\":" + tsInv + ",\"x\":" + rx + ",\"y\":" + ry + ",\"button\":\"left\"}");
       if (rDown && !wasR) clickJson.Add("{\"t\":" + tsInv + ",\"x\":" + rx + ",\"y\":" + ry + ",\"button\":\"right\"}");
@@ -585,10 +450,8 @@ public class PixopikRecorderApp : Form {
   }
 
   void StopRecording() {
-    tickTimer.Stop();
-    if (!isRecording) return;
-    isRecording = false;
-    recSw.Stop();
+    tickTimer.Stop(); if (!isRecording) return;
+    isRecording = false; recSw.Stop();
     PlayWav(Path.Combine(bdDataDir, "stop.wav"));
     if (miniBar != null && !miniBar.IsDisposed) miniBar.Hide();
 
@@ -598,7 +461,7 @@ public class PixopikRecorderApp : Form {
     }
 
     string durStr = Math.Round(recSw.Elapsed.TotalSeconds, 3).ToString(CultureInfo.InvariantCulture);
-    string mot = "{\"version\":\"3.3.0\",\"fps\":60,\"captureMode\":\"" + capMode + "\",\"screenWidth\":" + cropW + ",\"screenHeight\":" + cropH + ",\"duration\":" + durStr + ",\"samples\":[" + string.Join(",", sampleJson) + "],\"clicks\":[" + string.Join(",", clickJson) + "]}";
+    string mot = "{\"version\":\"3.4.0\",\"fps\":60,\"captureMode\":\"" + capMode + "\",\"screenWidth\":" + cropW + ",\"screenHeight\":" + cropH + ",\"duration\":" + durStr + ",\"samples\":[" + string.Join(",", sampleJson) + "],\"clicks\":[" + string.Join(",", clickJson) + "]}";
     File.WriteAllText(Path.Combine(curSessDir, "motion.json"), mot, new UTF8Encoding(false));
     File.WriteAllText(Path.Combine(curSessDir, "done.signal"), "OK", new UTF8Encoding(false));
 
@@ -619,17 +482,17 @@ public class PixopikRecorderApp : Form {
 
   void SavePrefsJson() {
     string[] camVals = { "dolly_steady", "click_bounce", "static_lock" };
-    int[] zoomVals = { 135, 150, 175 };
-    string[] deadVals = { "0.65", "0.45", "0.18" };
+    int[] zoomVals = { 135, 145, 170 };
+    int[] minDistVals = { 350, 550, 800, 1050 };
     string[] presetVals = { "youtube_tutorial", "saas_promo" };
     string[] aspectVals = { "youtube_16_9", "shorts_9_16", "square_1_1" };
     string[] wallVals = { "dark_carbon", "cosmic_indigo", "ocean_breeze", "sunset_saas" };
     int wallIdx = Math.Max(0, Math.Min(3, cmbBg.SelectedIndex));
 
     string json = string.Format(
-      "{{\"captureMode\":\"{0}\",\"bgImagePath\":\"{1}\",\"editMode\":\"{2}\",\"aspectPreset\":\"{3}\",\"cameraMode\":\"{4}\",\"zoomPercent\":{5},\"deadZoneRatio\":{6},\"cursorSmooth\":\"high\",\"wallpaper\":\"{7}\",\"frameStyle\":\"{8}\",\"clickSfx\":{9},\"clickRipples\":{10},\"autoRig\":{11},\"autoZoom\":{12}}}",
+      "{{\"captureMode\":\"{0}\",\"bgImagePath\":\"{1}\",\"editMode\":\"{2}\",\"aspectPreset\":\"{3}\",\"cameraMode\":\"{4}\",\"zoomPercent\":{5},\"minDollyPx\":{6},\"cursorSmooth\":\"high\",\"wallpaper\":\"{7}\",\"frameStyle\":\"{8}\",\"clickSfx\":{9},\"clickRipples\":{10},\"autoRig\":{11},\"autoZoom\":{12}}}",
       capMode, selectedBgPath, presetVals[Math.Max(0, cmbPreset.SelectedIndex)], aspectVals[Math.Max(0, cmbAspect.SelectedIndex)],
-      camVals[Math.Max(0, cmbCam.SelectedIndex)], zoomVals[Math.Max(0, cmbZoom.SelectedIndex)], deadVals[Math.Max(0, cmbDead.SelectedIndex)],
+      camVals[Math.Max(0, cmbCam.SelectedIndex)], zoomVals[Math.Max(0, cmbZoom.SelectedIndex)], minDistVals[Math.Max(0, cmbMinDist.SelectedIndex)],
       wallVals[wallIdx], cmbPreset.SelectedIndex == 0 ? "minimal_rounded" : "macos_glass",
       chkSfx.Checked ? "true" : "false", chkRip.Checked ? "true" : "false",
       chkAutoRig.Checked ? "true" : "false", cmbCam.SelectedIndex != 2 ? "true" : "false"
@@ -650,10 +513,8 @@ public class PixopikRecorderApp : Form {
 public class MiniGhostBar : Form {
   Label lblInfo;
   public MiniGhostBar(PixopikRecorderApp app) {
-    FormBorderStyle = FormBorderStyle.None;
-    TopMost = true; ShowInTaskbar = false;
-    Size = new Size(410, 42);
-    StartPosition = FormStartPosition.Manual;
+    FormBorderStyle = FormBorderStyle.None; TopMost = true; ShowInTaskbar = false;
+    Size = new Size(410, 42); StartPosition = FormStartPosition.Manual;
     Location = new Point((Screen.PrimaryScreen.Bounds.Width - 410) / 2, 8);
     BackColor = Color.FromArgb(16, 20, 29); Opacity = 0.95;
 
@@ -662,12 +523,10 @@ public class MiniGhostBar : Form {
     Controls.Add(lblInfo);
 
     Button bPause = new Button { Text = "⏸", Left = 242, Top = 6, Width = 38, Height = 30, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(30, 41, 59), ForeColor = Color.White };
-    bPause.Click += (s, e) => app.TogglePause();
-    Controls.Add(bPause);
+    bPause.Click += (s, e) => app.TogglePause(); Controls.Add(bPause);
 
     Button bStop = new Button { Text = "■ STOP (F12)", Left = 286, Top = 6, Width = 114, Height = 30, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(225, 29, 72), ForeColor = Color.White, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };
-    bStop.Click += (s, e) => app.ToggleRecord();
-    Controls.Add(bStop);
+    bStop.Click += (s, e) => app.ToggleRecord(); Controls.Add(bStop);
 
     Shown += (s, e) => { try { PixopikRecorderApp.SetWindowDisplayAffinity(Handle, 0x00000011); } catch {} };
   }
@@ -680,11 +539,8 @@ public class HollowFrameForm : Form {
   Color borderCol = Color.FromArgb(56, 189, 248);
 
   public HollowFrameForm(PixopikRecorderApp app) {
-    parentApp = app;
-    FormBorderStyle = FormBorderStyle.None;
-    StartPosition = FormStartPosition.CenterScreen;
-    Size = new Size(1288, 762);
-    TopMost = true; BackColor = Color.Magenta; TransparencyKey = Color.Magenta;
+    parentApp = app; FormBorderStyle = FormBorderStyle.None; StartPosition = FormStartPosition.CenterScreen;
+    Size = new Size(1288, 762); TopMost = true; BackColor = Color.Magenta; TransparencyKey = Color.Magenta;
 
     Panel topBar = new Panel { Dock = DockStyle.Top, Height = 38, BackColor = Color.FromArgb(17, 21, 30), Cursor = Cursors.SizeAll };
     topBar.MouseDown += (s, e) => { PixopikRecorderApp.ReleaseCapture(); PixopikRecorderApp.SendMessage(Handle, 0xA1, 0x2, 0); };
@@ -695,9 +551,7 @@ public class HollowFrameForm : Form {
     cmbSz.SelectedIndex = 0;
     cmbSz.SelectedIndexChanged += (s, e) => {
       int[][] sz = { new[]{1280,720}, new[]{1600,900}, new[]{1920,1080}, new[]{608,1080} };
-      var d = sz[cmbSz.SelectedIndex];
-      Size = new Size(d[0] + 8, d[1] + 42);
-      Invalidate();
+      var d = sz[cmbSz.SelectedIndex]; Size = new Size(d[0] + 8, d[1] + 42); Invalidate();
     };
     topBar.Controls.Add(cmbSz);
 
@@ -716,10 +570,7 @@ public class HollowFrameForm : Form {
     Resize += (s, e) => { parentApp.UpdateRectFromFrame(GetInnerScreenRect()); Invalidate(); };
   }
 
-  public Rectangle GetInnerScreenRect() {
-    Point tl = PointToScreen(new Point(4, 38));
-    return new Rectangle(tl.X, tl.Y, Width - 8, Height - 42);
-  }
+  public Rectangle GetInnerScreenRect() { Point tl = PointToScreen(new Point(4, 38)); return new Rectangle(tl.X, tl.Y, Width - 8, Height - 42); }
   public void SetRecState(bool rec) { borderCol = rec ? Color.FromArgb(239, 68, 68) : Color.FromArgb(56, 189, 248); btnRecBar.Text = rec ? "■ STOP" : "● REC (F12)"; Invalidate(); }
   public void UpdateTimerText(string t) { lblDim.Text = "● REC " + t; }
   protected override void OnPaint(PaintEventArgs e) { using (var pen = new Pen(borderCol, 4)) e.Graphics.DrawRectangle(pen, 2, 38, Width - 4, Height - 40); }

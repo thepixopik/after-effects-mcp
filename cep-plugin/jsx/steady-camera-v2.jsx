@@ -1,6 +1,4 @@
 (function () {
-  if (typeof PixopikAE === "undefined" || PixopikAE._steadyV2Loaded) return;
-
   var B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
   function decB64(input) {
     var str = String(input || "").replace(/[^A-Za-z0-9\+\/\=]/g, ""), out = "", i = 0;
@@ -55,17 +53,12 @@
       var ft = app.project.importFile(io);
       var bgLayer = null;
       for (var i = 1; i <= comp.numLayers; i++) {
-        if (comp.layer(i).name.indexOf("01_") === 0 || comp.layer(i).name.indexOf("Backdrop") !== -1) {
-          bgLayer = comp.layer(i);
-        }
+        if (comp.layer(i).name.indexOf("01_") === 0 || comp.layer(i).name.indexOf("Backdrop") !== -1) bgLayer = comp.layer(i);
       }
       var lyr = comp.layers.add(ft);
       lyr.name = "01B_Bandicam_HD_Wallpaper";
-      if (bgLayer) lyr.moveBefore(bgLayer);
-      else lyr.moveToEnd();
-      var sx = (comp.width / Math.max(1, ft.width)) * 100;
-      var sy = (comp.height / Math.max(1, ft.height)) * 100;
-      var sc = Math.max(sx, sy);
+      if (bgLayer) lyr.moveBefore(bgLayer); else lyr.moveToEnd();
+      var sc = Math.max((comp.width / Math.max(1, ft.width)) * 100, (comp.height / Math.max(1, ft.height)) * 100);
       lyr.property("ADBE Transform Group").property("ADBE Scale").setValue([sc, sc]);
       lyr.property("ADBE Transform Group").property("ADBE Position").setValue([comp.width / 2, comp.height / 2]);
     } catch (_ebg) {}
@@ -73,8 +66,7 @@
 
   function smoothCursorKeysEMA(keys) {
     if (!keys || keys.length < 4) return keys || [];
-    var out = [keys[0]];
-    var sx = keys[0].x, sy = keys[0].y;
+    var out = [keys[0]], sx = keys[0].x, sy = keys[0].y;
     for (var i = 1; i < keys.length - 1; i++) {
       sx = sx + 0.44 * (keys[i].x - sx);
       sy = sy + 0.44 * (keys[i].y - sy);
@@ -87,8 +79,7 @@
   function setBatch(prop, pairs, dur) {
     if (!prop || !pairs || !pairs.length) return;
     pairs.sort(function (a, b) { return a.t - b.t; });
-    var ts = [], vs = [], last = -99;
-    var lim = Math.max(0.2, dur - 0.01);
+    var ts = [], vs = [], last = -99, lim = Math.max(0.2, dur - 0.01);
     for (var i = 0; i < pairs.length; i++) {
       var t = Math.max(0, Math.min(lim, pairs[i].t));
       if (t <= last + 0.004) t = last + 0.005;
@@ -101,10 +92,10 @@
 
   function easeSteady(prop) {
     var n = prop.numKeys;
-    if (n < 2 || n > 140) return;
+    if (n < 2 || n > 160) return;
     var dims = (prop.keyValue(1) instanceof Array) ? prop.keyValue(1).length : 1;
     var eIn = [], eOut = [];
-    for (var d = 0; d < dims; d++) { eIn.push(new KeyframeEase(0, 86)); eOut.push(new KeyframeEase(0, 86)); }
+    for (var d = 0; d < dims; d++) { eIn.push(new KeyframeEase(0, 88)); eOut.push(new KeyframeEase(0, 88)); }
     for (var k = 1; k <= n; k++) {
       try {
         prop.setTemporalEaseAtKey(k, eIn, eOut);
@@ -113,13 +104,33 @@
     }
   }
 
-  function buildRockSteadyDolly(comp, events, zoomPct, deadZoneRatio) {
-    var camNull = null, curLayer = null;
+  /* =========================================================================
+   * v3.4 MINIMUM PIXEL DISTANCE TRAVEL DOLLY + EDGE-CLAMP LOCK!
+   * Cursor move < minDollyPx (default 550px) => 0% camera movement!
+   * ========================================================================= */
+  function buildDistanceLockedDolly(comp, events, zoomPct, minDollyPx) {
+    var camNull = null, curLayer = null, scrLayer = null;
     for (var l = 1; l <= comp.numLayers; l++) {
-      if (comp.layer(l).name === "05_Smart_Camera_Rig") camNull = comp.layer(l);
-      if (comp.layer(l).name === "04_Vector_Cursor") curLayer = comp.layer(l);
+      var lyr = comp.layer(l);
+      if (lyr.name === "05_Smart_Camera_Rig") camNull = lyr;
+      if (lyr.name === "04_Vector_Cursor") curLayer = lyr;
+      if (!scrLayer && (lyr.name.indexOf("Screen") !== -1 || lyr.name.indexOf("screen.mp4") !== -1 || lyr.name.indexOf("02_") === 0) && lyr.width > 200) {
+        scrLayer = lyr;
+      }
     }
-    if (!camNull) return 0;
+    if (!camNull) return { glides: 0, locked: 0 };
+
+    /* Attach / sync live Slider Control on 05_Smart_Camera_Rig */
+    var minDist = parseFloat(minDollyPx) || 550;
+    try {
+      var fx = camNull.property("ADBE Effect Parade");
+      var sl = fx.property("Dolly_Min_Distance_Px");
+      if (!sl) {
+        sl = fx.addProperty("ADBE Slider Control");
+        sl.name = "Dolly_Min_Distance_Px";
+      }
+      sl.property(1).setValue(minDist);
+    } catch (_esl) {}
 
     var camPos = camNull.property("ADBE Transform Group").property("ADBE Position");
     var camScl = camNull.property("ADBE Transform Group").property("ADBE Scale");
@@ -128,32 +139,47 @@
     camPos.expression = "";
     camScl.expression = "";
 
-    var cx = comp.width / 2, cy = comp.height / 2, dur = comp.duration;
-    camPos.setValue([cx, cy]); camScl.setValue([100, 100]);
-    if (!events || !events.length) return 0;
+    var cx = comp.width / 2.0, cy = comp.height / 2.0, dur = comp.duration;
+    camPos.setValue([cx, cy]);
+    camScl.setValue([100, 100]);
+    if (!events || !events.length) return { glides: 0, locked: 0 };
 
-    var z = (zoomPct || 150) / 100;
-    var dz = deadZoneRatio || 0.65;
-    var safeHalfW = ((comp.width / z) * dz) / 2;
-    var safeHalfH = ((comp.height / z) * dz) / 2;
+    var z = (zoomPct || 145) / 100.0;
+
+    /* Tight Edge-Clamp Lock so screen edge NEVER pulls awkwardly inside frame! */
+    var fitHalfW = comp.width * 0.475;
+    var fitHalfH = comp.height * 0.475;
+    if (scrLayer) {
+      try {
+        var scVal = scrLayer.property("ADBE Transform Group").property("ADBE Scale").value;
+        fitHalfW = (scrLayer.width * (scVal[0] / 100.0)) / 2.0;
+        fitHalfH = (scrLayer.height * (scVal[1] / 100.0)) / 2.0;
+      } catch (_esc) {}
+    }
+    var maxPanX = Math.max(0, z * fitHalfW - cx + 16);
+    var maxPanY = Math.max(0, z * fitHalfH - cy + 16);
 
     function camTargetForCompPt(px, py) {
-      var tx = cx - z * (px - cx), ty = cy - z * (py - cy);
-      var maxX = (comp.width * (z - 1)) * 0.47, maxY = (comp.height * (z - 1)) * 0.47;
-      return [Math.max(cx - maxX, Math.min(cx + maxX, tx)), Math.max(cy - maxY, Math.min(cy + maxY, ty))];
+      var tx = cx - z * (px - cx);
+      var ty = cy - z * (py - cy);
+      return [
+        Math.max(cx - maxPanX, Math.min(cx + maxPanX, tx)),
+        Math.max(cy - maxPanY, Math.min(cy + maxPanY, ty))
+      ];
     }
 
     var cPos = curLayer ? curLayer.property("ADBE Transform Group").property("ADBE Position") : null;
     var pKeys = [{ t: 0, v: [cx, cy] }], sKeys = [{ t: 0, v: [100, 100] }];
-    var isZoomed = false, curFocus = [cx, cy], curCamPt = [cx, cy], lastEvtT = 0, moves = 0;
+    var isZoomed = false, curFocus = [cx, cy], curCamPt = [cx, cy], lastEvtT = 0, lastGlideT = 0;
+    var glides = 0, locked = 0;
 
     for (var i = 0; i < events.length; i++) {
       var ev = events[i];
-      if (ev.t < 0.75 || ev.t > dur - 0.9) continue;
+      if (ev.t < 0.7 || ev.t > dur - 0.9) continue;
       var pt = cPos ? cPos.valueAtTime(ev.t, false) : [cx, cy];
 
-      if (isZoomed && (ev.t - lastEvtT) > 9.0) {
-        var zoomOutStart = lastEvtT + 1.8;
+      if (isZoomed && (ev.t - lastEvtT) > 9.5) {
+        var zoomOutStart = lastEvtT + 2.0;
         var zoomOutEnd   = Math.min(ev.t - 0.9, zoomOutStart + 0.75);
         if (zoomOutEnd > zoomOutStart + 0.2) {
           pKeys.push({ t: zoomOutStart, v: curCamPt }); sKeys.push({ t: zoomOutStart, v: [zoomPct, zoomPct] });
@@ -163,30 +189,33 @@
       }
 
       if (!isZoomed) {
-        var tStart = Math.max(0.08, ev.t - 0.55);
+        var tStart = Math.max(0.08, ev.t - 0.58);
         curFocus = [pt[0], pt[1]];
         curCamPt = camTargetForCompPt(pt[0], pt[1]);
-        pKeys.push({ t: tStart, v: [cx, cy] });  sKeys.push({ t: tStart, v: [100, 100] });
-        pKeys.push({ t: ev.t, v: curCamPt });    sKeys.push({ t: ev.t, v: [zoomPct, zoomPct] });
-        isZoomed = true; lastEvtT = ev.t; moves++;
+        pKeys.push({ t: tStart, v: [cx, cy] }); sKeys.push({ t: tStart, v: [100, 100] });
+        pKeys.push({ t: ev.t, v: curCamPt });   sKeys.push({ t: ev.t, v: [zoomPct, zoomPct] });
+        isZoomed = true; lastEvtT = ev.t; lastGlideT = ev.t; glides++;
       } else {
-        var outsideSafeBox = (Math.abs(pt[0] - curFocus[0]) > safeHalfW) || (Math.abs(pt[1] - curFocus[1]) > safeHalfH);
-        if (outsideSafeBox && (ev.t - lastEvtT) >= 0.85) {
-          var panStart = Math.max(lastEvtT + 0.25, ev.t - 0.58);
+        var dx = pt[0] - curFocus[0], dy = pt[1] - curFocus[1];
+        var distPx = Math.sqrt(dx * dx + dy * dy);
+        if (distPx >= minDist && (ev.t - lastGlideT) >= 1.0) {
+          var panStart = Math.max(lastGlideT + 0.3, ev.t - 0.65);
           pKeys.push({ t: panStart, v: curCamPt }); sKeys.push({ t: panStart, v: [zoomPct, zoomPct] });
           curFocus = [pt[0], pt[1]];
           curCamPt = camTargetForCompPt(pt[0], pt[1]);
           pKeys.push({ t: ev.t, v: curCamPt });     sKeys.push({ t: ev.t, v: [zoomPct, zoomPct] });
-          moves++;
+          lastGlideT = ev.t; glides++;
+        } else {
+          locked++;
         }
         lastEvtT = ev.t;
       }
     }
 
     if (isZoomed) {
-      var holdT = Math.min(dur - 0.85, lastEvtT + 1.2);
-      var endT  = Math.min(dur - 0.05, Math.max(holdT + 0.65, dur - 0.12));
-      if (holdT > lastEvtT + 0.05) {
+      var holdT = Math.min(dur - 0.85, lastEvtT + 1.4);
+      var endT  = Math.min(dur - 0.05, Math.max(holdT + 0.68, dur - 0.12));
+      if (holdT > lastGlideT + 0.06) {
         pKeys.push({ t: holdT, v: curCamPt }); sKeys.push({ t: holdT, v: [zoomPct, zoomPct] });
       }
       pKeys.push({ t: endT, v: [cx, cy] }); sKeys.push({ t: endT, v: [100, 100] });
@@ -196,77 +225,103 @@
     setBatch(camScl, sKeys, dur);
     easeSteady(camPos);
     easeSteady(camScl);
-    return moves;
+    return { glides: glides, locked: locked, minDist: minDist };
   }
 
-  var baseDispatch = PixopikAE.dispatch;
-  PixopikAE.dispatch = function (action, b64Args) {
-    if (action === "import_and_autorig_recording") {
-      try {
-        var parsed = b64Args ? eval("(" + decB64(b64Args) + ")") : {};
-        var full = parsed;
-        if (parsed.payloadFile) {
-          var pf = new File(parsed.payloadFile);
-          if (pf.exists && pf.open("r")) { pf.encoding = "UTF-8"; full = eval("(" + pf.read() + ")"); pf.close(); }
-        }
-        var v2Prefs = readStudioV2Prefs();
-        var camMode = v2Prefs.cameraMode || full.cameraMode || "dolly_steady";
-        var zPct    = v2Prefs.zoomPercent || full.zoomPercent || 150;
-        var dzRatio = v2Prefs.deadZoneRatio || full.deadZoneRatio || 0.65;
-        var cSmooth = v2Prefs.cursorSmooth || "high";
-
-        if (cSmooth === "high" && full.motion && full.motion.cursorKeys) {
-          full.motion.cursorKeys = smoothCursorKeysEMA(full.motion.cursorKeys);
-        }
-
-        if (camMode === "dolly_steady" || camMode === "smooth_travel" || camMode === "static_lock") {
-          var origAuto = full.autoZoom;
-          full.autoZoom = false;
-          if (parsed.payloadFile) {
-            var wf = new File(parsed.payloadFile);
-            wf.encoding = "UTF-8";
-            if (wf.open("w")) { wf.write(toJson(full)); wf.close(); }
-          }
-          var baseRaw = baseDispatch(action, encB64(toJson(parsed.payloadFile ? parsed : full)));
-          var baseRes = eval("(" + baseRaw + ")");
-          if (baseRes && baseRes.ok) {
-            var comp = app.project.activeItem;
-            app.beginUndoGroup("Bandicam Wallpaper & Steady Dolly v2.3");
-            try {
-              if (v2Prefs.bgImagePath) applyBandicamHdWallpaper(comp, v2Prefs.bgImagePath);
-              if (origAuto !== false && camMode !== "static_lock") {
-                var m = full.motion || {};
-                var evts = (m.clicks || []).concat(m.zoomPins || []);
-                evts.sort(function (a, b) { return a.t - b.t; });
-                baseRes.autoZoomClusters = buildRockSteadyDolly(comp, evts, zPct, dzRatio);
-                baseRes.cameraMode = "dolly_steady_v2";
-              }
-            } finally { app.endUndoGroup(); }
-          }
-          return toJson(baseRes);
-        }
-      } catch (_errV2) {}
+  function extractClickEventsFromComp(comp) {
+    var cur = null;
+    for (var i = 1; i <= comp.numLayers; i++) if (comp.layer(i).name === "04_Vector_Cursor") cur = comp.layer(i);
+    var evs = [];
+    if (cur) {
+      var sc = cur.property("ADBE Transform Group").property("ADBE Scale");
+      var lastT = -10;
+      for (var k = 1; k <= sc.numKeys; k++) {
+        var kv = sc.keyValue(k), kt = sc.keyTime(k);
+        if (kv[0] < 92 && (kt - lastT) > 0.22) { evs.push({ t: kt }); lastT = kt; }
+      }
     }
-    if (action === "apply_smooth_travel") {
-      try {
-        var compA = app.project ? app.project.activeItem : null;
-        if (!compA || !(compA instanceof CompItem)) return toJson({ ok: false, error: "Open a composition first!" });
-        var cur = null;
-        for (var i = 1; i <= compA.numLayers; i++) if (compA.layer(i).name === "04_Vector_Cursor") cur = compA.layer(i);
-        var evs = [];
-        if (cur) {
-          var sc = cur.property("ADBE Transform Group").property("ADBE Scale");
-          for (var k = 2; k <= sc.numKeys; k += 3) evs.push({ t: sc.keyTime(k) });
-        }
-        var vp = readStudioV2Prefs();
-        app.beginUndoGroup("Apply Rock-Steady Dolly v2.3");
-        try {
-          var mv = buildRockSteadyDolly(compA, evs, vp.zoomPercent || 150, vp.deadZoneRatio || 0.65);
-          return toJson({ ok: true, compName: compA.name, travelWaypoints: mv });
-        } finally { app.endUndoGroup(); }
-      } catch (e2) { return toJson({ ok: false, error: String(e2) }); }
+    return evs;
+  }
+
+  /* Expose direct helper so AE panel can apply custom px distance in 0.05s! */
+  $.global.PixopikApplyDollyDistance = function (minPx, zoomOpt) {
+    if (!app.project) return '{"ok":false,"error":"No project"}';
+    var comp = app.project.activeItem;
+    if (!comp || !(comp instanceof CompItem)) {
+      for (var i = app.project.numItems; i >= 1; i--) {
+        if (app.project.item(i) instanceof CompItem) { comp = app.project.item(i); break; }
+      }
     }
-    return baseDispatch(action, b64Args);
+    if (!comp || !(comp instanceof CompItem)) return '{"ok":false,"error":"Open a composition first!"}';
+    app.beginUndoGroup("Apply " + minPx + "px Dolly Distance Lock");
+    try {
+      var evs = extractClickEventsFromComp(comp);
+      var r = buildDistanceLockedDolly(comp, evs, zoomOpt || 145, minPx || 550);
+      return toJson({ ok: true, compName: comp.name, glides: r.glides, lockedClicks: r.locked, minDistPx: r.minDist });
+    } catch (e) {
+      return toJson({ ok: false, error: String(e) });
+    } finally {
+      app.endUndoGroup();
+    }
   };
-  PixopikAE._steadyV2Loaded = true;
+
+  if (typeof PixopikAE !== "undefined") {
+    var baseDispatch = PixopikAE._origBaseDispatch || PixopikAE.dispatch;
+    PixopikAE._origBaseDispatch = baseDispatch;
+
+    PixopikAE.dispatch = function (action, b64Args) {
+      if (action === "import_and_autorig_recording") {
+        try {
+          var parsed = b64Args ? eval("(" + decB64(b64Args) + ")") : {};
+          var full = parsed;
+          if (parsed.payloadFile) {
+            var pf = new File(parsed.payloadFile);
+            if (pf.exists && pf.open("r")) { pf.encoding = "UTF-8"; full = eval("(" + pf.read() + ")"); pf.close(); }
+          }
+          var v2Prefs = readStudioV2Prefs();
+          var camMode = v2Prefs.cameraMode || full.cameraMode || "dolly_steady";
+          var zPct    = v2Prefs.zoomPercent || full.zoomPercent || 145;
+          var minPx   = v2Prefs.minDollyPx || 550;
+          var cSmooth = v2Prefs.cursorSmooth || "high";
+
+          if (cSmooth === "high" && full.motion && full.motion.cursorKeys) {
+            full.motion.cursorKeys = smoothCursorKeysEMA(full.motion.cursorKeys);
+          }
+
+          if (camMode === "dolly_steady" || camMode === "smooth_travel" || camMode === "static_lock") {
+            var origAuto = full.autoZoom;
+            full.autoZoom = false;
+            if (parsed.payloadFile) {
+              var wf = new File(parsed.payloadFile);
+              wf.encoding = "UTF-8";
+              if (wf.open("w")) { wf.write(toJson(full)); wf.close(); }
+            }
+            var baseRaw = baseDispatch(action, encB64(toJson(parsed.payloadFile ? parsed : full)));
+            var baseRes = eval("(" + baseRaw + ")");
+            if (baseRes && baseRes.ok) {
+              var comp = app.project.activeItem;
+              app.beginUndoGroup("Distance-Locked Dolly v3.4");
+              try {
+                if (v2Prefs.bgImagePath) applyBandicamHdWallpaper(comp, v2Prefs.bgImagePath);
+                if (origAuto !== false && camMode !== "static_lock") {
+                  var m = full.motion || {};
+                  var evts = (m.clicks || []).concat(m.zoomPins || []);
+                  evts.sort(function (a, b) { return a.t - b.t; });
+                  var stats = buildDistanceLockedDolly(comp, evts, zPct, minPx);
+                  baseRes.autoZoomClusters = stats.glides;
+                  baseRes.minDollyPx = minPx;
+                }
+              } finally { app.endUndoGroup(); }
+            }
+            return toJson(baseRes);
+          }
+        } catch (_errV2) {}
+      }
+      if (action === "apply_smooth_travel") {
+        var vp = readStudioV2Prefs();
+        return $.global.PixopikApplyDollyDistance(vp.minDollyPx || 550, vp.zoomPercent || 145);
+      }
+      return baseDispatch(action, b64Args);
+    };
+  }
 })();

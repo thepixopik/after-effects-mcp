@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Pixopik Motion Studio Pro v3.0</title>
+  <title>Pixopik Motion Studio Pro v3.4</title>
   <link rel="stylesheet" href="./css/style.css" />
   <style>
     .header-right { display: flex; align-items: center; gap: 6px; }
@@ -13,13 +13,25 @@
     }
     .btn-sync:hover { background: #4f46e5; color: #ffffff; border-color: #6366f1; }
     .btn-studio-hero {
-      width: 100%; padding: 13px 14px; font-size: 13px; font-weight: 800;
+      width: 100%; padding: 12px 14px; font-size: 13px; font-weight: 800;
       border-radius: 9px; border: 1px solid #38bdf8; cursor: pointer;
       background: linear-gradient(135deg, #0284c7 0%, #4f46e5 100%);
       color: #ffffff; box-shadow: 0 4px 16px rgba(14, 165, 233, 0.38);
       margin-bottom: 7px; transition: all 0.15s ease;
     }
     .btn-studio-hero:hover { filter: brightness(1.1); transform: translateY(-1px); }
+    .dolly-bar {
+      display: flex; gap: 6px; align-items: center; margin-top: 6px;
+      background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 7px 8px;
+    }
+    .dolly-bar input {
+      width: 68px; background: #1e293b; color: #38bdf8; border: 1px solid #475569;
+      border-radius: 6px; padding: 5px 6px; font-size: 12px; font-weight: 800; text-align: center;
+    }
+    .dolly-bar select {
+      flex: 1; background: #1e293b; color: #f8fafc; border: 1px solid #475569;
+      border-radius: 6px; padding: 5px 6px; font-size: 11.5px; font-weight: 700;
+    }
   </style>
 </head>
 <body>
@@ -28,8 +40,8 @@
       <div class="brand">
         <span class="badge-logo">PX</span>
         <div>
-          <div class="title">Pixopik Motion Studio <span class="pro-pill" id="verPill">v3.0 EXE</span></div>
-          <div class="subtitle" id="verSubtitle">Native PixopikRecorder.exe • v3.0</div>
+          <div class="title">Pixopik Motion Studio <span class="pro-pill" id="verPill">v3.4</span></div>
+          <div class="subtitle" id="verSubtitle">Distance-Lock Dolly • v3.4</div>
         </div>
       </div>
       <div class="header-right">
@@ -41,9 +53,9 @@
       </div>
     </header>
 
-    <div id="quickBanner" class="quick-banner">v3.0 Native .EXE • Bandicam Hollow Frame + F12 Hotkey</div>
+    <div id="quickBanner" class="quick-banner">v3.4 Live • 550px Minimum Dolly Distance + Edge-Clamp Lock</div>
 
-    <!-- CARD 1: OWN STANDALONE NATIVE PIXOPIKRECORDER.EXE -->
+    <!-- CARD 1: STANDALONE NATIVE RECORDER -->
     <section class="card">
       <div class="card-title">🎬 Standalone Native Screen Recorder (.EXE)</div>
       <button id="btnOpenRecorderStudio" class="btn-studio-hero">🚀 Launch PixopikRecorder.exe (Native App)</button>
@@ -65,7 +77,23 @@
       </div>
     </section>
 
-    <!-- CARD 2: TIMELINE POLISH -->
+    <!-- CARD 2: TRAVEL DOLLY MINIMUM DISTANCE CONTROLLER -->
+    <section class="card">
+      <div class="card-title">📏 Travel Dolly Minimum Distance Lock</div>
+      <div style="font-size:10.5px;color:#94a3b8;">Cursor move below this px distance = 0% camera move (100% locked!)</div>
+      <div class="dolly-bar">
+        <select id="dollyDistPreset">
+          <option value="350">350 px (Medium)</option>
+          <option value="550" selected>550 px (Pro Default)</option>
+          <option value="800">800 px (Wide Lock)</option>
+          <option value="1050">1050 px (Ultra Lock)</option>
+        </select>
+        <input id="dollyDistCustom" type="number" min="100" max="1800" step="50" value="550" title="Exact Minimum Distance in Pixels" />
+        <button id="btnApplyDollyDist" class="btn-mini" style="background:#4f46e5;color:#fff;padding:6px 10px;">Apply</button>
+      </div>
+    </section>
+
+    <!-- CARD 3: TIMELINE POLISH -->
     <section class="card">
       <div class="card-title">✨ Timeline Polish &amp; Creator Actions</div>
       <div class="grid-btns">
