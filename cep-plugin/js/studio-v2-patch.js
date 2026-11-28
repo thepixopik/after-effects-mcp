@@ -18,7 +18,7 @@
   var STEADY_JSX  = path.join(EXT_ROOT, "jsx", "steady-camera-v2.jsx");
   var CS_SRC      = path.join(EXT_ROOT, "recorder", "PixopikRecorder.cs");
   var REC_ROOT    = path.join(process.env.USERPROFILE || os.homedir(), "Videos", "PixopikRecordings");
-  var NATIVE_EXE  = path.join(REC_ROOT, "PixopikRecorder_v40.exe");
+  var NATIVE_EXE  = path.join(REC_ROOT, "PixopikRecorder_v401.exe");
   var DONE_SIG    = path.join(REC_ROOT, "native_done.signal");
   var PORT_FILE   = path.join(REC_ROOT, "ae_bridge_port.txt");
   var PREFS_FILE  = path.join(REC_ROOT, "studio_v2_prefs.json");
@@ -26,11 +26,11 @@
 
   function syncBadges() {
     var pill = document.getElementById("verPill") || document.querySelector(".pro-pill");
-    if (pill) pill.textContent = "v4.0";
+    if (pill) pill.textContent = "v4.0.1";
     var verSub = document.getElementById("verSubtitle");
-    if (verSub) verSub.textContent = "FocuSee 3-Layer Cinema • v4.0";
+    if (verSub) verSub.textContent = "Original SFX + FocuSee • v4.0.1";
     var qBan = document.getElementById("quickBanner");
-    if (qBan) qBan.textContent = "v4.0 FocuSee Engine • Click Zoom + Cursor Dolly + Typing Motion Blur";
+    if (qBan) qBan.textContent = "v4.0.1 Live • Original Click (-2.5dB) + Velvet Whoosh (-4dB) Restored!";
   }
   syncBadges();
   setTimeout(syncBadges, 300);
@@ -43,6 +43,94 @@
     row.className = "log-item ok";
     row.textContent = "[" + new Date().toLocaleTimeString() + "] " + msg;
     logList.insertBefore(row, logList.firstChild);
+  }
+
+  /* =========================================================================
+   * EXACT ORIGINAL TACTILE CLICK (-2.5 dB) + SUBTLE VELVET AIR SWISH (-4 dB)!
+   * ========================================================================= */
+  function buildOriginalClickAndVelvetWhooshWav(clickTimes, whooshTimes, durationSec, outWavPath) {
+    var sr = 22050;
+    var dur = Math.max(2.5, (durationSec || 10) + 0.35);
+    var totalSamples = Math.ceil(dur * sr);
+    var pcm = new Int16Array(totalSamples);
+
+    /* 1. Exact Original Tactile Mechanical Click Template (85ms: 1550Hz + 420Hz + 1950Hz release) */
+    var clkLen = Math.floor(sr * 0.085);
+    var clkTpl = new Int16Array(clkLen);
+    for (var j = 0; j < clkLen; j++) {
+      var lt = j / sr;
+      var w = (Math.sin(6.283185 * 1550 * lt) * Math.exp(-lt * 210) * 0.62) +
+              (Math.sin(6.283185 * 420 * lt) * Math.exp(-lt * 95) * 0.48);
+      if (lt >= 0.046) {
+        var lt2 = lt - 0.046;
+        w += Math.sin(6.283185 * 1950 * lt2) * Math.exp(-lt2 * 280) * 0.22;
+      }
+      var s = Math.max(-1, Math.min(1, w * 0.85));
+      clkTpl[j] = Math.round(s * 32767);
+    }
+
+    /* 2. Exact Subtle Soft Velvet Air Swish Template (260ms warm low-passed velvet air, zero harsh hiss!) */
+    var swLen = Math.floor(sr * 0.26);
+    var swTpl = new Int16Array(swLen);
+    var lp1 = 0, lp2 = 0, seed = 1337;
+    for (var m = 0; m < swLen; m++) {
+      var u = m / swLen;
+      seed = (seed * 16807) % 2147483647;
+      var white = ((seed / 1073741823.5) - 1.0);
+      /* Warm sweeping low-pass filter (gentle velvet air breath) */
+      var alpha = 0.06 + 0.14 * Math.sin(Math.PI * u);
+      lp1 += alpha * (white - lp1);
+      lp2 += alpha * (lp1 - lp2);
+      var env = Math.pow(Math.sin(Math.PI * u), 1.85);
+      var sw = Math.max(-1, Math.min(1, lp2 * env * 0.42));
+      swTpl[m] = Math.round(sw * 32767);
+    }
+
+    var placed = 0;
+    var lastC = -1;
+    var cArr = clickTimes || [];
+    for (var c = 0; c < cArr.length; c++) {
+      var ct = Number(cArr[c]);
+      if (isNaN(ct) || ct < 0 || ct - lastC < 0.06) continue;
+      lastC = ct;
+      var i0 = Math.floor(ct * sr);
+      if (i0 >= totalSamples) break;
+      var maxK = Math.min(clkLen, totalSamples - i0);
+      for (var k = 0; k < maxK; k++) {
+        var sum = pcm[i0 + k] + clkTpl[k];
+        pcm[i0 + k] = sum > 32767 ? 32767 : (sum < -32768 ? -32768 : sum);
+      }
+      placed++;
+    }
+
+    var lastW = -1;
+    var wArr = whooshTimes || [];
+    for (var wi = 0; wi < wArr.length; wi++) {
+      var wt = Number(wArr[wi]);
+      if (isNaN(wt) || wt < 0 || wt - lastW < 0.45) continue;
+      lastW = wt;
+      var wi0 = Math.floor(wt * sr);
+      if (wi0 >= totalSamples) break;
+      var maxM = Math.min(swLen, totalSamples - wi0);
+      for (var mk = 0; mk < maxM; mk++) {
+        var sum2 = pcm[wi0 + mk] + swTpl[mk];
+        pcm[wi0 + mk] = sum2 > 32767 ? 32767 : (sum2 < -32768 ? -32768 : sum2);
+      }
+      placed++;
+    }
+
+    if (placed === 0) return null;
+
+    var dataByteLen = pcm.byteLength;
+    var wav = Buffer.alloc(44 + dataByteLen);
+    wav.write("RIFF", 0); wav.writeUInt32LE(36 + dataByteLen, 4); wav.write("WAVE", 8);
+    wav.write("fmt ", 12); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20);
+    wav.writeUInt16LE(1, 22); wav.writeUInt32LE(sr, 24); wav.writeUInt32LE(sr * 2, 28);
+    wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write("data", 36);
+    wav.writeUInt32LE(dataByteLen, 40);
+    Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).copy(wav, 44);
+    fs.writeFileSync(outWavPath, wav);
+    return outWavPath;
   }
 
   function injectSteadyJsx(cb) {
@@ -69,9 +157,10 @@
   var presetSel = document.getElementById("dollyDistPreset");
   var customInp = document.getElementById("dollyDistCustom");
   var applyBtn  = document.getElementById("btnApplyDollyDist");
+  var chkSfxBox = document.getElementById("chkOrigSfx");
   var chkClick  = document.getElementById("chkClickZoomPunch");
   var chkBlur   = document.getElementById("chk3WayBlur");
-  var chkType   = document.getElementById("chkTypingRamp");
+  var chkType   = document.getElementById("chkTypingHide");
 
   function getSelectedMinPx() {
     if (customInp && parseInt(customInp.value, 10) >= 80) return parseInt(customInp.value, 10);
@@ -85,24 +174,27 @@
   }
 
   var applyingNow = false;
-  function applyFocuSeeToOpenComp(pxVal, autoSilent, explicitMotionPath) {
+  function applyFocuSeeAndOriginalSfx(pxVal, autoSilent, explicitMotionPath) {
     if (applyingNow) return;
     applyingNow = true;
     var minPx = parseInt(pxVal, 10) || getSelectedMinPx();
+    var wantSfx = chkSfxBox ? chkSfxBox.checked : true;
+    var motPath = explicitMotionPath || findLatestMotionJson();
+
     var opts = {
       minDollyPx: minPx,
       zoomPercent: 148,
       clickZoomPunch: chkClick ? chkClick.checked : true,
       threeWayBlur: chkBlur ? chkBlur.checked : true,
-      typingRamp: chkType ? chkType.checked : true,
-      motionPath: explicitMotionPath || findLatestMotionJson()
+      typingHide: chkType ? chkType.checked : true,
+      motionPath: motPath
     };
 
     try {
       var curP = fs.existsSync(PREFS_FILE) ? JSON.parse(fs.readFileSync(PREFS_FILE, "utf8")) : {};
       curP.minDollyPx = minPx;
       curP.threeWayBlur = opts.threeWayBlur;
-      curP.typingRamp = opts.typingRamp;
+      curP.clickSfx = wantSfx;
       fs.writeFileSync(PREFS_FILE, JSON.stringify(curP), "utf8");
     } catch (_ep) {}
 
@@ -110,24 +202,38 @@
       if (!window.__adobe_cep__) { applyingNow = false; return; }
       var argStr = JSON.stringify(JSON.stringify(opts));
       window.__adobe_cep__.evalScript("$.global.PixopikApplyFocuSeeEngine(" + argStr + ")", function (raw) {
-        applyingNow = false;
         try {
           var r = JSON.parse(raw || "{}");
           if (r && r.ok) {
-            var extra = r.typingRamps ? (" • " + r.typingRamps + " typing speed-ramps!") : "";
-            uiLog("🌀 FocuSee v4.0 (" + r.minDistPx + "px Dolly, " + r.clickPunches + " click-zooms, " + r.glides + " glides, 3-Way Blur ON" + extra + ")");
+            /* Immediately build & inject the exact Original Click (-2.5dB) + Velvet Whoosh (-4dB) WAV! */
+            if (wantSfx && ((r.clickTimes && r.clickTimes.length > 0) || (r.whooshTimes && r.whooshTimes.length > 0))) {
+              var outWav = path.join(REC_ROOT, "studio_sfx_" + Date.now() + ".wav");
+              var built = buildOriginalClickAndVelvetWhooshWav(r.clickTimes || [], r.whooshTimes || [], r.duration || 15, outWav);
+              if (built) {
+                var safeW = built.replace(/\\/g, "/");
+                window.__adobe_cep__.evalScript('$.global.PixopikInjectStudioSfxWav("' + safeW + '")', function () {
+                  applyingNow = false;
+                  uiLog("🔊 Original Click (-2.5dB) + Velvet Whoosh (-4dB) SFX + FocuSee Dolly restored on " + r.compName + "!");
+                });
+                return;
+              }
+            }
+            applyingNow = false;
+            uiLog("🎥 Applied FocuSee Dolly (" + r.minDistPx + "px) on " + r.compName + "!");
+            return;
           } else if (!autoSilent && r && r.error) {
             uiLog("Note: " + r.error);
           }
         } catch (_er) {}
+        applyingNow = false;
       });
     });
   }
 
-  /* 1. Auto-upgrade currently open composition right on v4.0 Sync! */
-  setTimeout(function () { applyFocuSeeToOpenComp(getSelectedMinPx(), true); }, 750);
+  /* 1. Immediately unwrap any muted precomp & restore exact Original SFX right on v4.0.1 Sync! */
+  setTimeout(function () { applyFocuSeeAndOriginalSfx(getSelectedMinPx(), true); }, 700);
 
-  /* 2. Auto-apply FocuSee Engine immediately after EVERY panel.js 'Rigged in X.XXs' event! */
+  /* 2. Auto-apply after every 'Rigged in X.XXs' import */
   var lastSessMotion = "";
   var logContainer = document.getElementById("logList");
   if (logContainer && typeof MutationObserver !== "undefined") {
@@ -138,7 +244,7 @@
           var txt = added[j].textContent || "";
           if (txt.indexOf("Rigged in ") !== -1) {
             var mp = lastSessMotion || findLatestMotionJson();
-            setTimeout(function () { applyFocuSeeToOpenComp(getSelectedMinPx(), false, mp); }, 150);
+            setTimeout(function () { applyFocuSeeAndOriginalSfx(getSelectedMinPx(), false, mp); }, 150);
             return;
           }
         }
@@ -147,23 +253,23 @@
     obs.observe(logContainer, { childList: true });
   }
 
-  /* 3. Wire UI controls */
   if (presetSel && customInp) {
     presetSel.onchange = function () {
       customInp.value = presetSel.value;
-      applyFocuSeeToOpenComp(presetSel.value, false);
+      applyFocuSeeAndOriginalSfx(presetSel.value, false);
     };
   }
-  if (applyBtn && customInp) applyBtn.onclick = function () { applyFocuSeeToOpenComp(customInp.value, false); };
-  if (chkClick) chkClick.onchange = function () { applyFocuSeeToOpenComp(getSelectedMinPx(), false); };
-  if (chkBlur)  chkBlur.onchange  = function () { applyFocuSeeToOpenComp(getSelectedMinPx(), false); };
-  if (chkType)  chkType.onchange  = function () { applyFocuSeeToOpenComp(getSelectedMinPx(), false); };
+  if (applyBtn && customInp) applyBtn.onclick = function () { applyFocuSeeAndOriginalSfx(customInp.value, false); };
+  if (chkSfxBox) chkSfxBox.onchange = function () { applyFocuSeeAndOriginalSfx(getSelectedMinPx(), false); };
+  if (chkClick)  chkClick.onchange  = function () { applyFocuSeeAndOriginalSfx(getSelectedMinPx(), false); };
+  if (chkBlur)   chkBlur.onchange   = function () { applyFocuSeeAndOriginalSfx(getSelectedMinPx(), false); };
+  if (chkType)   chkType.onchange   = function () { applyFocuSeeAndOriginalSfx(getSelectedMinPx(), false); };
 
   var fixBtn = document.getElementById("btnSmoothTravel");
   if (fixBtn) {
     fixBtn.onclick = function (ev) {
       if (ev && ev.stopImmediatePropagation) ev.stopImmediatePropagation();
-      applyFocuSeeToOpenComp(getSelectedMinPx(), false);
+      applyFocuSeeAndOriginalSfx(getSelectedMinPx(), false);
     };
   }
 
@@ -177,14 +283,12 @@
     var prefs = {};
     try { if (fs.existsSync(PREFS_FILE)) prefs = JSON.parse(fs.readFileSync(PREFS_FILE, "utf8")); } catch (_ep) {}
     if (prefs.minDollyPx && customInp) customInp.value = String(prefs.minDollyPx);
-    if (typeof prefs.threeWayBlur === "boolean" && chkBlur) chkBlur.checked = prefs.threeWayBlur;
-    if (typeof prefs.typingRamp === "boolean" && chkType) chkType.checked = prefs.typingRamp;
     try {
       if (prefs.editMode && document.getElementById("modeSelect")) document.getElementById("modeSelect").value = prefs.editMode;
       if (prefs.aspectPreset && document.getElementById("aspectSelect")) document.getElementById("aspectSelect").value = prefs.aspectPreset;
       if (prefs.wallpaper && document.getElementById("wallpaperSelect")) document.getElementById("wallpaperSelect").value = prefs.wallpaper;
       if (prefs.frameStyle && document.getElementById("frameStyleSelect")) document.getElementById("frameStyleSelect").value = prefs.frameStyle;
-      if (typeof prefs.clickSfx === "boolean" && document.getElementById("chkClickSfx")) document.getElementById("chkClickSfx").checked = prefs.clickSfx;
+      if (document.getElementById("chkClickSfx")) document.getElementById("chkClickSfx").checked = (prefs.clickSfx !== false);
       if (typeof prefs.clickRipples === "boolean" && document.getElementById("chkRipples")) document.getElementById("chkRipples").checked = prefs.clickRipples;
       if (typeof prefs.autoZoom === "boolean" && document.getElementById("chkAutoZoom")) document.getElementById("chkAutoZoom").checked = prefs.autoZoom;
     } catch (_es) {}
@@ -245,8 +349,8 @@
     var csc = findCscCompiler();
     if (!csc || !fs.existsSync(CS_SRC)) { uiLog("Compiler missing: " + CS_SRC); return; }
 
-    cp.execFile("taskkill.exe", ["/F", "/IM", "PixopikRecorder_v34.exe"], function () {
-      cp.execFile("taskkill.exe", ["/F", "/IM", "PixopikRecorder_v40.exe"], function () {
+    cp.execFile("taskkill.exe", ["/F", "/IM", "PixopikRecorder_v40.exe"], function () {
+      cp.execFile("taskkill.exe", ["/F", "/IM", "PixopikRecorder_v401.exe"], function () {
         var needBuild = !fs.existsSync(NATIVE_EXE);
         if (!needBuild) {
           try { needBuild = fs.statSync(CS_SRC).mtimeMs > fs.statSync(NATIVE_EXE).mtimeMs; } catch (_e) { needBuild = true; }
@@ -254,17 +358,17 @@
         function spawnExe() {
           var envCopy = Object.assign({}, process.env, { PIXOPIK_REC_ROOT: REC_ROOT });
           cp.spawn(NATIVE_EXE, [], { detached: true, stdio: "ignore", cwd: REC_ROOT, env: envCopy }).unref();
-          uiLog("🚀 Launched PixopikRecorder v4.0 (FocuSee Engine)!");
+          uiLog("🚀 Launched PixopikRecorder v4.0.1 (Original SFX + FocuSee)!");
         }
         if (!needBuild) { spawnExe(); return; }
-        uiLog("⚡ Building PixopikRecorder v4.0...");
+        uiLog("⚡ Building PixopikRecorder v4.0.1...");
         cp.execFile(csc, [
           "/nologo", "/target:winexe", "/optimize+",
           "/r:System.Windows.Forms.dll", "/r:System.Drawing.dll", "/r:System.dll",
           "/out:" + NATIVE_EXE, CS_SRC
         ], { timeout: 15000 }, function (err, stdout, stderr) {
           if (err && !fs.existsSync(NATIVE_EXE)) { uiLog("Compile error: " + (stderr || stdout || err.message)); return; }
-          uiLog("✅ Ready: PixopikRecorder_v40.exe");
+          uiLog("✅ Ready: PixopikRecorder_v401.exe");
           spawnExe();
         });
       });
@@ -280,7 +384,7 @@
       var desk = path.join(os.homedir(), "Desktop", "Launch Pixopik Recorder.bat");
       try {
         fs.writeFileSync(desk, '@echo off\r\nset "PIXOPIK_REC_ROOT=' + REC_ROOT + '"\r\nstart "" "' + NATIVE_EXE + '"\r\n', "utf8");
-        uiLog("📌 Updated Desktop Shortcut to v4.0!");
+        uiLog("📌 Updated Desktop Shortcut to v4.0.1!");
       } catch (e) { uiLog("Shortcut note: " + e.message); }
     };
   }

@@ -81,11 +81,6 @@
     }
   }
 
-  /* =========================================================================
-   * 1. FOCUSEE 3-WAY OPTICAL MOTION BLUR (Zoom + Screen Pan + Vector Cursor)
-   *    190 deg shutter = silky directional blur ONLY while moving/zooming,
-   *    100% razor-sharp UI text when camera stops!
-   * ========================================================================= */
   function configure3WayMotionBlur(comp, enableBlur) {
     var on = enableBlur !== false;
     comp.motionBlur = on;
@@ -94,7 +89,8 @@
     }
     for (var l = 1; l <= comp.numLayers; l++) {
       var lyr = comp.layer(l);
-      if (lyr.name.indexOf("01_") === 0 || lyr.name.indexOf("Backdrop") !== -1 || lyr.name.indexOf("Wallpaper") !== -1) {
+      var nm = lyr.name || "";
+      if (nm.indexOf("01_") === 0 || nm.indexOf("Backdrop") !== -1 || nm.indexOf("Wallpaper") !== -1 || nm.indexOf("SFX") !== -1 || nm.indexOf("Voiceover") !== -1) {
         try { lyr.motionBlur = false; } catch (_e0) {}
       } else {
         try { lyr.motionBlur = on; } catch (_e1) {}
@@ -102,9 +98,6 @@
     }
   }
 
-  /* =========================================================================
-   * 2. AUTO-HIDE IDLE CURSOR DURING TYPING BURSTS (FocuSee Style!)
-   * ========================================================================= */
   function applyTypingCursorAutoHide(curLayer, typingBursts, dur) {
     if (!curLayer) return 0;
     var op = curLayer.property("ADBE Transform Group").property("ADBE Opacity");
@@ -127,103 +120,27 @@
       oKeys.push({ t: fadeIn,    v: 100 });
       hiddenCount++;
     }
-    if (hiddenCount > 0) {
-      setBatch(op, oKeys, dur);
-    }
+    if (hiddenCount > 0) setBatch(op, oKeys, dur);
     return hiddenCount;
   }
 
   /* =========================================================================
-   * 3. SYNCHRONIZED 1.85x TYPING SPEED-RAMP WRAPPER COMP (>2.5s Bursts)
-   *    Wraps base comp into FocuSee_Master_<name> so Video + Cursor + Ripples
-   *    + Camera ALL speed-ramp in 100% sync with 200-deg shutter motion blur!
+   * UNWRAP ANY MUTED FocuSee_Edit_ PRECOMP SO ORIGINAL COMP + SFX PLAY 100%!
    * ========================================================================= */
-  function buildSynchronizedTypingSpeedRamp(baseComp, typingBursts) {
-    if (!typingBursts || !typingBursts.length) return null;
-    var longBursts = [];
-    for (var i = 0; i < typingBursts.length; i++) {
-      var b = typingBursts[i];
-      if (b && (b.tEnd - b.tStart) >= 2.5 && b.tStart > 0.4 && b.tEnd < baseComp.duration - 0.4) {
-        longBursts.push({ tStart: b.tStart, tEnd: b.tEnd });
-      }
+  function ensureBaseCompOpenAndUnmuted(comp) {
+    if (comp.name.indexOf("FocuSee_Edit_") === 0 && comp.numLayers >= 1 && comp.layer(1).source instanceof CompItem) {
+      var baseComp = comp.layer(1).source;
+      var wrapperComp = comp;
+      try { baseComp.openInViewer(); } catch (_eo) {}
+      try { wrapperComp.remove(); } catch (_er) {}
+      return baseComp;
     }
-    if (!longBursts.length) return null;
-    longBursts.sort(function (a, b) { return a.tStart - b.tStart; });
-
-    var masterName = "FocuSee_Edit_" + baseComp.name.replace(/^FocuSee_Edit_/, "");
-    for (var it = app.project.numItems; it >= 1; it--) {
-      if (app.project.item(it) instanceof CompItem && app.project.item(it).name === masterName) {
-        try { app.project.item(it).remove(); } catch (_er) {}
-      }
-    }
-
-    var srcDur = baseComp.duration;
-    var rampSpeed = 1.85;
-    var trPairs = [{ outT: 0, srcT: 0 }];
-    var curSrc = 0, curOut = 0;
-
-    for (var k = 0; k < longBursts.length; k++) {
-      var lb = longBursts[k];
-      if (lb.tStart > curSrc + 0.05) {
-        curOut += (lb.tStart - curSrc);
-        curSrc = lb.tStart;
-        trPairs.push({ outT: curOut, srcT: curSrc });
-      }
-      var segDur = lb.tEnd - curSrc;
-      if (segDur > 0.2) {
-        curOut += (segDur / rampSpeed);
-        curSrc = lb.tEnd;
-        trPairs.push({ outT: curOut, srcT: curSrc, marker: "Typing 1.85x" });
-      }
-    }
-    if (srcDur > curSrc + 0.02) {
-      curOut += (srcDur - curSrc);
-      trPairs.push({ outT: curOut, srcT: srcDur });
-    }
-
-    var newDur = Math.max(1.0, curOut);
-    var masterComp = app.project.items.addComp(masterName, baseComp.width, baseComp.height, 1.0, newDur, baseComp.frameRate);
-    masterComp.motionBlur = true;
-    try { masterComp.shutterAngle = 210; masterComp.shutterPhase = -105; } catch (_ems) {}
-
-    var nested = masterComp.layers.add(baseComp);
-    nested.name = "01_Rigged_Timeline_Sync";
-    nested.timeRemapEnabled = true;
-    nested.motionBlur = true;
-    nested.outPoint = newDur;
-
-    var trProp = nested.property("ADBE Time Remapping");
-    while (trProp.numKeys > 1) trProp.removeKey(trProp.numKeys);
-
-    var ts = [], vs = [];
-    for (var m = 0; m < trPairs.length; m++) {
-      ts.push(Math.min(newDur - 0.005, trPairs[m].outT));
-      vs.push(Math.min(srcDur - 0.005, trPairs[m].srcT));
-      if (trPairs[m].marker) {
-        try {
-          var mv = new MarkerValue(trPairs[m].marker);
-          nested.property("ADBE Marker").setValueAtTime(trPairs[m].outT, mv);
-        } catch (_emk) {}
-      }
-    }
-    trProp.setValuesAtTimes(ts, vs);
-    easeSteady(trProp);
-
-    try { masterComp.openInViewer(); } catch (_evw) {}
-    return { masterName: masterName, ramps: longBursts.length, savedSec: Math.round((srcDur - newDur) * 10) / 10 };
+    return comp;
   }
 
-  /* =========================================================================
-   * 4. FOCUSEE 3-LAYER CAMERA ENGINE:
-   *    - Click = Zoom Focus (100% -> 150%, or 150% -> 165% Focus Punch!)
-   *    - Cursor Move >= minDollyPx = Smooth Dolly Travel (Same Zoom Glide!)
-   *    - Cursor Move < minDollyPx  = 0% Camera Drift (100% Tripod Lock!)
-   * ========================================================================= */
-  function applyFocuSee3LayerEngine(comp, opts) {
+  function applyFocuSee3LayerEngine(rawComp, opts) {
     opts = opts || {};
-    if (comp.name.indexOf("FocuSee_Edit_") === 0 && comp.numLayers >= 1 && comp.layer(1).source instanceof CompItem) {
-      comp = comp.layer(1).source;
-    }
+    var comp = ensureBaseCompOpenAndUnmuted(rawComp);
 
     var camNull = null, curLayer = null, scrLayer = null;
     for (var l = 1; l <= comp.numLayers; l++) {
@@ -233,6 +150,10 @@
       if (!scrLayer && (lyr.name.indexOf("Screen") !== -1 || lyr.name.indexOf("screen.mp4") !== -1 || lyr.name.indexOf("02_") === 0) && lyr.width > 200) {
         scrLayer = lyr;
       }
+      /* Ensure existing Click SFX layer is NEVER muted! */
+      if (lyr.name.indexOf("SFX") !== -1) {
+        lyr.audioEnabled = true;
+      }
     }
     if (!camNull || !curLayer) return { ok: false, error: "Camera Rig or Vector Cursor missing in " + comp.name };
 
@@ -240,9 +161,8 @@
     var baseZoomPct   = parseFloat(opts.zoomPercent) || 148;
     var clickPunchPct = opts.clickZoomPunch !== false ? Math.min(185, baseZoomPct + 17) : baseZoomPct;
     var enableBlur    = opts.threeWayBlur !== false;
-    var enableTyping  = opts.typingRamp !== false;
+    var enableTyping  = opts.typingHide !== false;
 
-    /* Load motion.json if available for typingBursts & exact clicks */
     var motionObj = opts.motionPath ? readJsonFileSafe(opts.motionPath) : null;
     var typingBursts = (motionObj && motionObj.typingBursts) ? motionObj.typingBursts : [];
 
@@ -288,15 +208,14 @@
       ];
     }
 
-    /* Extract click timestamps from Vector Cursor scale pulses */
     var cPos = curLayer.property("ADBE Transform Group").property("ADBE Position");
     var cScl = curLayer.property("ADBE Transform Group").property("ADBE Scale");
     var clickTimes = [];
     var prevClickT = -10;
     for (var ck = 1; ck <= cScl.numKeys; ck++) {
       var kv = cScl.keyValue(ck), kt = cScl.keyTime(ck);
-      if (kv[0] < 92 && (kt - prevClickT) > 0.25) {
-        clickTimes.push(kt);
+      if (kv[0] < 92 && (kt - prevClickT) > 0.22) {
+        clickTimes.push(Math.round(kt * 1000) / 1000);
         prevClickT = kt;
       }
     }
@@ -316,137 +235,175 @@
       return null;
     }
 
-    /* Sample cursor trajectory at 10 Hz */
     var dt = 0.10, samples = [];
     for (var t = 0.25; t <= Math.max(0.3, dur - 0.55); t += dt) {
       var pv = cPos.valueAtTime(t, false);
       samples.push({ t: Math.round(t * 100) / 100, x: pv[0], y: pv[1] });
     }
-    if (samples.length < 2) return { ok: true, compName: comp.name, glides: 0, clickPunches: 0, minDistPx: minDist };
 
     var pKeys = [{ t: 0, v: [cx, cy] }];
     var sKeys = [{ t: 0, v: [100, 100] }];
+    var whooshTimes = [];
+    var dollyGlides = 0, clickPunches = 0;
 
-    var p0 = samples[0];
-    var curFocus = [p0.x, p0.y];
-    var curZoom  = baseZoomPct;
-    var curCamPt = camTargetForCompPt(p0.x, p0.y, curZoom);
-    var initT = Math.min(0.68, dur * 0.25);
-    pKeys.push({ t: initT, v: curCamPt });
-    sKeys.push({ t: initT, v: [curZoom, curZoom] });
+    if (samples.length >= 2) {
+      var p0 = samples[0];
+      var curFocus = [p0.x, p0.y];
+      var curZoom  = baseZoomPct;
+      var curCamPt = camTargetForCompPt(p0.x, p0.y, curZoom);
+      var initT = Math.min(0.68, dur * 0.25);
+      pKeys.push({ t: initT, v: curCamPt });
+      sKeys.push({ t: initT, v: [curZoom, curZoom] });
+      whooshTimes.push(Math.round((initT * 0.35) * 1000) / 1000);
 
-    var lastKeyT = initT;
-    var dollyGlides = 1, clickPunches = 0;
+      var lastKeyT = initT;
+      dollyGlides = 1;
 
-    var idx = 1;
-    while (idx < samples.length) {
-      var s = samples[idx];
-      if (s.t <= lastKeyT + 0.12) { idx++; continue; }
+      var idx = 1;
+      while (idx < samples.length) {
+        var s = samples[idx];
+        if (s.t <= lastKeyT + 0.12) { idx++; continue; }
 
-      /* Case A: Check if a Click happened right around s.t! -> CLICK = ZOOM FOCUS PUNCH! */
-      var clkT = hasNearbyClick(s.t - 0.06, s.t + 0.06);
-      if (clkT > lastKeyT + 0.22 && clkT < dur - 0.75) {
-        var clkPt = cPos.valueAtTime(clkT, false);
-        var tbAfter = findTypingBurstAt(clkT + 0.4);
-        var punchZ = clickPunchPct;
-        var punchStart = Math.max(lastKeyT + 0.10, clkT - 0.38);
+        var clkT = hasNearbyClick(s.t - 0.06, s.t + 0.06);
+        if (clkT > lastKeyT + 0.22 && clkT < dur - 0.75) {
+          var clkPt = cPos.valueAtTime(clkT, false);
+          var tbAfter = findTypingBurstAt(clkT + 0.4);
+          var punchZ = clickPunchPct;
+          var punchStart = Math.max(lastKeyT + 0.10, clkT - 0.38);
 
-        pKeys.push({ t: punchStart, v: curCamPt });
-        sKeys.push({ t: punchStart, v: [curZoom, curZoom] });
+          pKeys.push({ t: punchStart, v: curCamPt });
+          sKeys.push({ t: punchStart, v: [curZoom, curZoom] });
 
-        curFocus = [clkPt[0], clkPt[1]];
-        curCamPt = camTargetForCompPt(clkPt[0], clkPt[1], punchZ);
-        pKeys.push({ t: clkT, v: curCamPt });
-        sKeys.push({ t: clkT, v: [punchZ, punchZ] });
+          var moveDistOnClick = Math.sqrt(Math.pow(clkPt[0] - curFocus[0], 2) + Math.pow(clkPt[1] - curFocus[1], 2));
+          if (moveDistOnClick >= 220) whooshTimes.push(Math.round(punchStart * 1000) / 1000);
 
-        /* Hold closer zoom across typing burst (or 0.85s focus pulse on normal click), then ease back to base Dolly zoom */
-        var holdUntil = tbAfter ? Math.min(dur - 0.9, tbAfter.tEnd + 0.25) : Math.min(dur - 0.9, clkT + 0.85);
-        var relaxEnd  = Math.min(dur - 0.75, holdUntil + 0.48);
-        if (relaxEnd > holdUntil + 0.15 && punchZ > baseZoomPct) {
-          pKeys.push({ t: holdUntil, v: curCamPt });
-          sKeys.push({ t: holdUntil, v: [punchZ, punchZ] });
-          curZoom  = baseZoomPct;
-          curCamPt = camTargetForCompPt(curFocus[0], curFocus[1], curZoom);
-          pKeys.push({ t: relaxEnd, v: curCamPt });
-          sKeys.push({ t: relaxEnd, v: [curZoom, curZoom] });
-          lastKeyT = relaxEnd;
-        } else {
-          curZoom = punchZ;
-          lastKeyT = clkT;
+          curFocus = [clkPt[0], clkPt[1]];
+          curCamPt = camTargetForCompPt(clkPt[0], clkPt[1], punchZ);
+          pKeys.push({ t: clkT, v: curCamPt });
+          sKeys.push({ t: clkT, v: [punchZ, punchZ] });
+
+          var holdUntil = tbAfter ? Math.min(dur - 0.9, tbAfter.tEnd + 0.25) : Math.min(dur - 0.9, clkT + 0.85);
+          var relaxEnd  = Math.min(dur - 0.75, holdUntil + 0.48);
+          if (relaxEnd > holdUntil + 0.15 && punchZ > baseZoomPct) {
+            pKeys.push({ t: holdUntil, v: curCamPt });
+            sKeys.push({ t: holdUntil, v: [punchZ, punchZ] });
+            curZoom  = baseZoomPct;
+            curCamPt = camTargetForCompPt(curFocus[0], curFocus[1], curZoom);
+            pKeys.push({ t: relaxEnd, v: curCamPt });
+            sKeys.push({ t: relaxEnd, v: [curZoom, curZoom] });
+            lastKeyT = relaxEnd;
+          } else {
+            curZoom = punchZ;
+            lastKeyT = clkT;
+          }
+          clickPunches++;
+          while (idx < samples.length && samples[idx].t <= lastKeyT + 0.1) idx++;
+          continue;
         }
-        clickPunches++;
-        while (idx < samples.length && samples[idx].t <= lastKeyT + 0.1) idx++;
-        continue;
+
+        var dx = s.x - curFocus[0], dy = s.y - curFocus[1];
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < minDist) { idx++; continue; }
+
+        var departIdx = Math.max(0, idx - 2);
+        var j = idx, maxLook = Math.min(samples.length - 1, idx + 14);
+        while (j < maxLook) {
+          var stepSpd = Math.sqrt(Math.pow(samples[j + 1].x - samples[j].x, 2) + Math.pow(samples[j + 1].y - samples[j].y, 2)) / dt;
+          if (stepSpd < 220) break;
+          j++;
+        }
+
+        var dest = samples[j];
+        var destDist = Math.sqrt(Math.pow(dest.x - curFocus[0], 2) + Math.pow(dest.y - curFocus[1], 2));
+        if (destDist < minDist) { idx = j + 1; continue; }
+
+        var panStart = Math.max(lastKeyT + 0.16, samples[departIdx].t);
+        var panEnd   = Math.max(panStart + 0.62, dest.t + 0.12);
+        if (panEnd > dur - 0.75) break;
+
+        pKeys.push({ t: panStart, v: curCamPt });
+        sKeys.push({ t: panStart, v: [curZoom, curZoom] });
+        whooshTimes.push(Math.round((panStart + 0.06) * 1000) / 1000);
+
+        curFocus = [dest.x, dest.y];
+        curZoom  = baseZoomPct;
+        curCamPt = camTargetForCompPt(dest.x, dest.y, curZoom);
+
+        pKeys.push({ t: panEnd, v: curCamPt });
+        sKeys.push({ t: panEnd, v: [curZoom, curZoom] });
+
+        lastKeyT = panEnd;
+        dollyGlides++;
+        idx = j + 3;
       }
 
-      /* Case B: Check Cursor Distance from curFocus -> >= minDist = SMOOTH DOLLY TRAVEL! */
-      var dx = s.x - curFocus[0], dy = s.y - curFocus[1];
-      var dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < minDist) {
-        idx++;
-        continue;
+      if (dur > lastKeyT + 0.85) {
+        var hEnd = Math.max(lastKeyT + 0.15, dur - 0.82);
+        pKeys.push({ t: hEnd, v: curCamPt });
+        sKeys.push({ t: hEnd, v: [curZoom, curZoom] });
+        pKeys.push({ t: dur - 0.06, v: [cx, cy] });
+        sKeys.push({ t: dur - 0.06, v: [100, 100] });
+        whooshTimes.push(Math.round(hEnd * 1000) / 1000);
       }
 
-      var departIdx = Math.max(0, idx - 2);
-      var j = idx, maxLook = Math.min(samples.length - 1, idx + 14);
-      while (j < maxLook) {
-        var stepSpd = Math.sqrt(Math.pow(samples[j + 1].x - samples[j].x, 2) + Math.pow(samples[j + 1].y - samples[j].y, 2)) / dt;
-        if (stepSpd < 220) break;
-        j++;
-      }
-
-      var dest = samples[j];
-      var destDist = Math.sqrt(Math.pow(dest.x - curFocus[0], 2) + Math.pow(dest.y - curFocus[1], 2));
-      if (destDist < minDist) { idx = j + 1; continue; }
-
-      var panStart = Math.max(lastKeyT + 0.16, samples[departIdx].t);
-      var panEnd   = Math.max(panStart + 0.62, dest.t + 0.12);
-      if (panEnd > dur - 0.75) break;
-
-      pKeys.push({ t: panStart, v: curCamPt });
-      sKeys.push({ t: panStart, v: [curZoom, curZoom] });
-
-      curFocus = [dest.x, dest.y];
-      curZoom  = baseZoomPct;
-      curCamPt = camTargetForCompPt(dest.x, dest.y, curZoom);
-
-      pKeys.push({ t: panEnd, v: curCamPt });
-      sKeys.push({ t: panEnd, v: [curZoom, curZoom] });
-
-      lastKeyT = panEnd;
-      dollyGlides++;
-      idx = j + 3;
+      setBatch(camPos, pKeys, dur);
+      setBatch(camScl, sKeys, dur);
+      easeSteady(camPos);
+      easeSteady(camScl);
     }
-
-    if (dur > lastKeyT + 0.85) {
-      var hEnd = Math.max(lastKeyT + 0.15, dur - 0.82);
-      pKeys.push({ t: hEnd, v: curCamPt });
-      sKeys.push({ t: hEnd, v: [curZoom, curZoom] });
-      pKeys.push({ t: dur - 0.06, v: [cx, cy] });
-      sKeys.push({ t: dur - 0.06, v: [100, 100] });
-    }
-
-    setBatch(camPos, pKeys, dur);
-    setBatch(camScl, sKeys, dur);
-    easeSteady(camPos);
-    easeSteady(camScl);
 
     var vp = readStudioV2Prefs();
     if (vp.bgImagePath) applyBandicamHdWallpaper(comp, vp.bgImagePath);
 
-    var rampInfo = enableTyping ? buildSynchronizedTypingSpeedRamp(comp, typingBursts) : null;
-
     return {
       ok: true,
-      compName: rampInfo ? rampInfo.masterName : comp.name,
+      compName: comp.name,
+      duration: Math.round(dur * 100) / 100,
       glides: dollyGlides,
       clickPunches: clickPunches,
+      clickTimes: clickTimes,
+      whooshTimes: whooshTimes,
       typingHidden: hiddenBursts,
-      typingRamps: rampInfo ? rampInfo.ramps : 0,
-      motionBlur3Way: enableBlur,
       minDistPx: minDist
     };
   }
+
+  /* Injects or refreshes 07_Mouse_Click_SFX with exact original Click (-2.5dB) + Soft Velvet Whoosh (-4dB)! */
+  $.global.PixopikInjectStudioSfxWav = function (wavPathStr) {
+    if (!app.project) return '{"ok":false}';
+    var comp = app.project.activeItem;
+    if (!comp || !(comp instanceof CompItem)) {
+      for (var i = app.project.numItems; i >= 1; i--) {
+        if (app.project.item(i) instanceof CompItem) { comp = app.project.item(i); break; }
+      }
+    }
+    if (!comp) return '{"ok":false}';
+    var wf = new File(wavPathStr);
+    if (!wf.exists) return '{"ok":false,"error":"WAV missing"}';
+
+    app.beginUndoGroup("Restore Original Studio Click + Whoosh SFX");
+    try {
+      for (var l = comp.numLayers; l >= 1; l--) {
+        var nm = comp.layer(l).name || "";
+        if (nm === "07_Mouse_Click_SFX" || nm === "07_Studio_Click_Whoosh_SFX") {
+          try { comp.layer(l).remove(); } catch (_er) {}
+        }
+      }
+      var audioItem = app.project.importFile(new ImportOptions(wf));
+      var aLyr = comp.layers.add(audioItem);
+      aLyr.name = "07_Mouse_Click_SFX";
+      aLyr.startTime = 0;
+      aLyr.audioEnabled = true;
+      try {
+        aLyr.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([-2.5, -2.5]);
+      } catch (_ea) {}
+      return '{"ok":true,"layer":"07_Mouse_Click_SFX"}';
+    } catch (e) {
+      return toJson({ ok: false, error: String(e) });
+    } finally {
+      app.endUndoGroup();
+    }
+  };
 
   $.global.PixopikApplyFocuSeeEngine = function (b64OrJsonOpts) {
     if (!app.project) return '{"ok":false,"error":"No project"}';
@@ -457,7 +414,7 @@
       }
     }
     if (!comp || !(comp instanceof CompItem)) return '{"ok":false,"error":"Open a composition first!"}';
-    app.beginUndoGroup("Apply Pixopik v4.0 FocuSee Engine");
+    app.beginUndoGroup("Apply Pixopik v4.0.1 FocuSee + Original SFX");
     try {
       var opts = {};
       if (typeof b64OrJsonOpts === "string" && b64OrJsonOpts.length > 1) {
@@ -468,7 +425,7 @@
       var vp = readStudioV2Prefs();
       if (!opts.minDollyPx) opts.minDollyPx = vp.minDollyPx || 550;
       if (!opts.zoomPercent) opts.zoomPercent = vp.zoomPercent || 148;
-      if (vp.cameraMode === "static_lock") return toJson({ ok: true, compName: comp.name, glides: 0, clickPunches: 0, minDistPx: opts.minDollyPx });
+      if (vp.cameraMode === "static_lock") return toJson({ ok: true, compName: comp.name, glides: 0, clickPunches: 0, clickTimes: [], whooshTimes: [], minDistPx: opts.minDollyPx });
       return toJson(applyFocuSee3LayerEngine(comp, opts));
     } catch (e) {
       return toJson({ ok: false, error: String(e) });
@@ -477,7 +434,6 @@
     }
   };
 
-  /* Keep backward compatibility alias */
   $.global.PixopikApplyDollyDistance = function (minPx, zoomOpt) {
     return $.global.PixopikApplyFocuSeeEngine(toJson({ minDollyPx: minPx || 550, zoomPercent: zoomOpt || 148 }));
   };

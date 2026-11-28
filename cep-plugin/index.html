@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Pixopik Motion Studio Pro v4.0</title>
+  <title>Pixopik Motion Studio Pro v4.0.1</title>
   <link rel="stylesheet" href="./css/style.css" />
   <style>
     .header-right { display: flex; align-items: center; gap: 6px; }
@@ -45,8 +45,8 @@
       <div class="brand">
         <span class="badge-logo">PX</span>
         <div>
-          <div class="title">Pixopik Motion Studio <span class="pro-pill" id="verPill">v4.0</span></div>
-          <div class="subtitle" id="verSubtitle">FocuSee 3-Layer Cinema • v4.0</div>
+          <div class="title">Pixopik Motion Studio <span class="pro-pill" id="verPill">v4.0.1</span></div>
+          <div class="subtitle" id="verSubtitle">Original SFX + FocuSee • v4.0.1</div>
         </div>
       </div>
       <div class="header-right">
@@ -58,12 +58,12 @@
       </div>
     </header>
 
-    <div id="quickBanner" class="quick-banner">v4.0 FocuSee Engine • Click Zoom + Cursor Dolly + Typing Motion Blur</div>
+    <div id="quickBanner" class="quick-banner">v4.0.1 Live • Original Click + Velvet Whoosh SFX Restored!</div>
 
     <!-- CARD 1: STANDALONE NATIVE RECORDER -->
     <section class="card">
       <div class="card-title">🎬 Standalone Native Screen Recorder (.EXE)</div>
-      <button id="btnOpenRecorderStudio" class="btn-studio-hero">🚀 Launch PixopikRecorder v4.0 (.EXE)</button>
+      <button id="btnOpenRecorderStudio" class="btn-studio-hero">🚀 Launch PixopikRecorder v4.0.1 (.EXE)</button>
 
       <button id="btnStop" class="btn btn-stop hidden" style="width:100%;margin-bottom:6px;">■ Stop Active Recording &amp; Rig</button>
       <div id="recTimer" class="timer hidden">00:00 • Recording...</div>
@@ -82,10 +82,10 @@
       </div>
     </section>
 
-    <!-- CARD 2: FOCUSEE 3-LAYER CAMERA & MOTION BLUR ENGINE -->
+    <!-- CARD 2: FOCUSEE 3-LAYER CAMERA & ORIGINAL SFX -->
     <section class="card">
-      <div class="card-title">🌀 FocuSee 3-Layer Camera &amp; Motion Blur</div>
-      <div style="font-size:10.5px;color:#94a3b8;">Click = Zoom • Move &ge; px = Dolly • Typing = Hide Cursor + Speed Blur</div>
+      <div class="card-title">🌀 FocuSee Camera + Original Studio SFX</div>
+      <div style="font-size:10.5px;color:#94a3b8;">Click = Zoom • Move &ge; px = Dolly • Original Click + Soft Whoosh SFX</div>
       <div class="dolly-bar">
         <select id="dollyDistPreset">
           <option value="350">Move &ge; 350 px</option>
@@ -97,9 +97,10 @@
         <button id="btnApplyDollyDist" class="btn-mini" style="background:#4f46e5;color:#fff;padding:6px 10px;">Apply</button>
       </div>
       <div class="focusee-checks">
-        <label><input type="checkbox" id="chkClickZoomPunch" checked /> 🎯 <b>Click = Zoom Focus</b> (150% &rarr; 165% Punch on Click)</label>
-        <label><input type="checkbox" id="chk3WayBlur" checked /> 🌀 <b>3-Way Motion Blur</b> (190&deg; Zoom + Dolly + Cursor Blur)</label>
-        <label><input type="checkbox" id="chkTypingRamp" checked /> ⌨️ <b>Smart Typing (&gt;2.5s)</b> (Auto-Hide Cursor + 1.85x Blur Ramp)</label>
+        <label><input type="checkbox" id="chkOrigSfx" checked /> 🔊 <b>Original Tactile Click (-2.5dB) + Soft Velvet Whoosh (-4dB)</b></label>
+        <label><input type="checkbox" id="chkClickZoomPunch" checked /> 🎯 <b>Click = Zoom Focus</b> (148% &rarr; 165% Punch on Click)</label>
+        <label><input type="checkbox" id="chk3WayBlur" checked /> 🌀 <b>3-Way Motion Blur</b> (190&deg; Zoom + Dolly + Cursor + Typing)</label>
+        <label><input type="checkbox" id="chkTypingHide" checked /> ⌨️ <b>Typing Focus + Auto-Hide Idle Cursor</b> (Zero Audio Mute!)</label>
       </div>
     </section>
 
@@ -107,7 +108,7 @@
     <section class="card">
       <div class="card-title">✨ Timeline Polish &amp; Creator Actions</div>
       <div class="grid-btns">
-        <button id="btnSmoothTravel" class="btn btn-chip accent-chip">🎥 Re-Apply FocuSee</button>
+        <button id="btnSmoothTravel" class="btn btn-chip accent-chip">🔊 Restore SFX + Dolly</button>
         <button id="btnSubscribe" class="btn btn-chip accent-chip">🔔 + YT Subscribe</button>
         <button id="btnChapter" class="btn btn-chip">📑 + YT Chapter</button>
         <button id="btnSpotlight" class="btn btn-chip">💡 + Spotlight</button>

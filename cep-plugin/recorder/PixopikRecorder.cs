@@ -48,7 +48,7 @@ public class PixopikRecorderApp : Form {
   Label lblTimer, lblSub, lblFooter;
   Button btnRec, btnPause;
   ComboBox cmbMode, cmbCam, cmbZoom, cmbMinDist, cmbPreset, cmbAspect, cmbBg, cmbWin;
-  CheckBox chkSfx, chkRip, chkAutoRig, chkBlur3Way, chkTypingRamp, chkHideOnRec;
+  CheckBox chkSfx, chkRip, chkAutoRig, chkBlur3Way, chkTypingHide, chkHideOnRec;
   Panel paneHome, paneVideos, paneImages, paneAe;
   ListBox lstVideos, lstImages;
   HollowFrameForm rectFrame = null;
@@ -66,7 +66,7 @@ public class PixopikRecorderApp : Form {
     bdDataDir  = Directory.Exists(@"C:\Program Files\Bandicam\data") ? @"C:\Program Files\Bandicam\data" : @"C:\Program Files (x86)\Bandicam\data";
     ffmpegExe  = FindFfmpegSafe();
 
-    Text = "Pixopik Screen Recorder Pro v4.0 (FocuSee Cinema Edition)";
+    Text = "Pixopik Screen Recorder Pro v4.0.1 (Original SFX + FocuSee)";
     ClientSize = new Size(860, 535);
     MinimumSize = new Size(780, 495);
     StartPosition = FormStartPosition.CenterScreen;
@@ -184,7 +184,7 @@ public class PixopikRecorderApp : Form {
     leftCluster.Controls.AddRange(new Control[] { cmbMode, btnDraw, btnChr });
     top.Controls.Add(rightCluster); top.Controls.Add(leftCluster);
 
-    lblFooter = new Label { Dock = DockStyle.Bottom, Height = 28, BackColor = Color.FromArgb(14, 18, 26), ForeColor = Color.FromArgb(148, 163, 184), TextAlign = ContentAlignment.MiddleLeft, Text = "  v4.0 FocuSee Engine  •  Click = Zoom  •  Cursor >=550px = Dolly  •  Typing = Hide Cursor + Speed Motion Blur!" };
+    lblFooter = new Label { Dock = DockStyle.Bottom, Height = 28, BackColor = Color.FromArgb(14, 18, 26), ForeColor = Color.FromArgb(148, 163, 184), TextAlign = ContentAlignment.MiddleLeft, Text = "  v4.0.1 Ready  •  Original Tactile Click (-2.5dB) + Velvet Whoosh (-4dB) SFX + FocuSee Camera!" };
 
     Panel nav = new Panel { Dock = DockStyle.Left, Width = 170, BackColor = Color.FromArgb(19, 24, 34), Padding = new Padding(8, 12, 8, 12) };
     FlowLayoutPanel navFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
@@ -223,7 +223,7 @@ public class PixopikRecorderApp : Form {
     winPanel.Controls.Add(winRow); winPanel.Controls.Add(lWin);
 
     Panel camPanel = new Panel { Dock = DockStyle.Top, Height = 152, BackColor = Color.FromArgb(18, 23, 33), Padding = new Padding(12, 8, 12, 8) };
-    Label lCam = new Label { Text = "🌀 FOCUSEE 3-LAYER ENGINE (CLICK ZOOM + CURSOR DOLLY + TYPING BLUR):", Dock = DockStyle.Top, Height = 22, ForeColor = Color.FromArgb(56, 189, 248), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };
+    Label lCam = new Label { Text = "🌀 FOCUSEE CAMERA + ORIGINAL CLICK & VELVET WHOOSH SFX:", Dock = DockStyle.Top, Height = 22, ForeColor = Color.FromArgb(56, 189, 248), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };
     FlowLayoutPanel camRow1 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 36, WrapContents = false };
     cmbCam = MakeCombo(new[] { "🌀 FocuSee 3-Layer (Click Zoom + Dolly)", "🎯 Classic Click Zoom In/Out", "📌 Static Locked (0% Move)" }, 0, 240);
     cmbMinDist = MakeCombo(new[] { "📏 Move >= 350 px", "📏 Move >= 550 px (Pro)", "📏 Move >= 800 px", "📏 Move >= 1050 px" }, 1, 165);
@@ -232,13 +232,13 @@ public class PixopikRecorderApp : Form {
 
     FlowLayoutPanel camRow2 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 30, WrapContents = false };
     chkBlur3Way = new CheckBox { Text = "🌀 3-Way Optical Motion Blur (190°)", Checked = true, AutoSize = true, ForeColor = Color.FromArgb(165, 243, 252) };
-    chkTypingRamp = new CheckBox { Text = "⌨️ Typing (>2.5s): Hide Cursor + 1.85x Blur Ramp", Checked = true, AutoSize = true, Margin = new Padding(14, 3, 0, 0), ForeColor = Color.FromArgb(165, 243, 252) };
-    camRow2.Controls.AddRange(new Control[] { chkBlur3Way, chkTypingRamp });
+    chkTypingHide = new CheckBox { Text = "⌨️ Typing Focus + Auto-Hide Idle Cursor", Checked = true, AutoSize = true, Margin = new Padding(16, 3, 0, 0), ForeColor = Color.FromArgb(165, 243, 252) };
+    camRow2.Controls.AddRange(new Control[] { chkBlur3Way, chkTypingHide });
 
     FlowLayoutPanel camRow3 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 30, WrapContents = false };
     chkAutoRig = new CheckBox { Text = "⚡ Auto-Rig AE on Stop", Checked = true, AutoSize = true, ForeColor = Color.White };
-    chkSfx = new CheckBox { Text = "🔊 Click SFX", Checked = true, AutoSize = true, Margin = new Padding(16, 3, 0, 0), ForeColor = Color.FromArgb(203, 213, 225) };
-    chkRip = new CheckBox { Text = "💫 Click Ripples", Checked = true, AutoSize = true, Margin = new Padding(16, 3, 0, 0), ForeColor = Color.FromArgb(203, 213, 225) };
+    chkSfx = new CheckBox { Text = "🔊 Original Click (-2.5dB) + Velvet Whoosh (-4dB)", Checked = true, AutoSize = true, Margin = new Padding(16, 3, 0, 0), ForeColor = Color.FromArgb(203, 213, 225) };
+    chkRip = new CheckBox { Text = "💫 Ripples", Checked = true, AutoSize = true, Margin = new Padding(16, 3, 0, 0), ForeColor = Color.FromArgb(203, 213, 225) };
     camRow3.Controls.AddRange(new Control[] { chkAutoRig, chkSfx, chkRip });
 
     camPanel.Controls.Add(camRow3); camPanel.Controls.Add(camRow2); camPanel.Controls.Add(camRow1); camPanel.Controls.Add(lCam);
@@ -494,7 +494,6 @@ public class PixopikRecorderApp : Form {
     }
     wasL = lDown; wasR = rDown;
 
-    /* Privacy-safe Typing Burst Timing (never stores what character was typed!) */
     bool keyDown = CheckAnyTypingKeyDown();
     if (keyDown && !wasAnyTypingKey) keyStrokeTimes.Add(t);
     wasAnyTypingKey = keyDown;
@@ -513,7 +512,7 @@ public class PixopikRecorderApp : Form {
 
     string durStr = Math.Round(recSw.Elapsed.TotalSeconds, 3).ToString(CultureInfo.InvariantCulture);
     string burstsJson = BuildTypingBurstsJson();
-    string mot = "{\"version\":\"4.0.0\",\"fps\":60,\"captureMode\":\"" + capMode + "\",\"screenWidth\":" + cropW + ",\"screenHeight\":" + cropH + ",\"duration\":" + durStr + ",\"samples\":[" + string.Join(",", sampleJson) + "],\"clicks\":[" + string.Join(",", clickJson) + "],\"typingBursts\":[" + burstsJson + "]}";
+    string mot = "{\"version\":\"4.0.1\",\"fps\":60,\"captureMode\":\"" + capMode + "\",\"screenWidth\":" + cropW + ",\"screenHeight\":" + cropH + ",\"duration\":" + durStr + ",\"samples\":[" + string.Join(",", sampleJson) + "],\"clicks\":[" + string.Join(",", clickJson) + "],\"typingBursts\":[" + burstsJson + "]}";
     File.WriteAllText(Path.Combine(curSessDir, "motion.json"), mot, new UTF8Encoding(false));
     File.WriteAllText(Path.Combine(curSessDir, "done.signal"), "OK", new UTF8Encoding(false));
 
@@ -542,10 +541,10 @@ public class PixopikRecorderApp : Form {
     int wallIdx = Math.Max(0, Math.Min(3, cmbBg.SelectedIndex));
 
     string json = string.Format(
-      "{{\"captureMode\":\"{0}\",\"bgImagePath\":\"{1}\",\"editMode\":\"{2}\",\"aspectPreset\":\"{3}\",\"cameraMode\":\"{4}\",\"zoomPercent\":{5},\"minDollyPx\":{6},\"threeWayBlur\":{7},\"typingRamp\":{8},\"cursorSmooth\":\"high\",\"wallpaper\":\"{9}\",\"frameStyle\":\"{10}\",\"clickSfx\":{11},\"clickRipples\":{12},\"autoRig\":{13},\"autoZoom\":{14}}}",
+      "{{\"captureMode\":\"{0}\",\"bgImagePath\":\"{1}\",\"editMode\":\"{2}\",\"aspectPreset\":\"{3}\",\"cameraMode\":\"{4}\",\"zoomPercent\":{5},\"minDollyPx\":{6},\"threeWayBlur\":{7},\"typingHide\":{8},\"cursorSmooth\":\"high\",\"wallpaper\":\"{9}\",\"frameStyle\":\"{10}\",\"clickSfx\":{11},\"clickRipples\":{12},\"autoRig\":{13},\"autoZoom\":{14}}}",
       capMode, selectedBgPath, presetVals[Math.Max(0, cmbPreset.SelectedIndex)], aspectVals[Math.Max(0, cmbAspect.SelectedIndex)],
       camVals[Math.Max(0, cmbCam.SelectedIndex)], zoomVals[Math.Max(0, cmbZoom.SelectedIndex)], minDistVals[Math.Max(0, cmbMinDist.SelectedIndex)],
-      chkBlur3Way.Checked ? "true" : "false", chkTypingRamp.Checked ? "true" : "false",
+      chkBlur3Way.Checked ? "true" : "false", chkTypingHide.Checked ? "true" : "false",
       wallVals[wallIdx], cmbPreset.SelectedIndex == 0 ? "minimal_rounded" : "macos_glass",
       chkSfx.Checked ? "true" : "false", chkRip.Checked ? "true" : "false",
       chkAutoRig.Checked ? "true" : "false", cmbCam.SelectedIndex != 2 ? "true" : "false"
