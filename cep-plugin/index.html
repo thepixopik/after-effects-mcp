@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Pixopik Motion Studio Pro v2.3</title>
+  <title>Pixopik Motion Studio Pro v3.0</title>
   <link rel="stylesheet" href="./css/style.css" />
   <style>
     .header-right { display: flex; align-items: center; gap: 6px; }
@@ -13,24 +13,13 @@
     }
     .btn-sync:hover { background: #4f46e5; color: #ffffff; border-color: #6366f1; }
     .btn-studio-hero {
-      width: 100%; padding: 12px 14px; font-size: 12.8px; font-weight: 800;
+      width: 100%; padding: 13px 14px; font-size: 13px; font-weight: 800;
       border-radius: 9px; border: 1px solid #38bdf8; cursor: pointer;
       background: linear-gradient(135deg, #0284c7 0%, #4f46e5 100%);
-      color: #ffffff; box-shadow: 0 4px 16px rgba(14, 165, 233, 0.35);
-      margin-bottom: 6px; transition: all 0.15s ease;
-    }
-    .btn-studio-hero:hover { filter: brightness(1.1); transform: translateY(-1px); }
-    .btn-bdcam-bridge {
-      width: 100%; padding: 10px 12px; font-size: 12px; font-weight: 800;
-      border-radius: 8px; border: 1px solid #f43f5e; cursor: pointer;
-      background: rgba(225, 29, 72, 0.16); color: #fda4af;
+      color: #ffffff; box-shadow: 0 4px 16px rgba(14, 165, 233, 0.38);
       margin-bottom: 7px; transition: all 0.15s ease;
     }
-    .btn-bdcam-bridge:hover { background: #e11d48; color: #ffffff; }
-    .btn-bdcam-bridge.active-watch {
-      background: linear-gradient(135deg, #059669 0%, #10b981 100%);
-      border-color: #6ee7b7; color: #ffffff;
-    }
+    .btn-studio-hero:hover { filter: brightness(1.1); transform: translateY(-1px); }
   </style>
 </head>
 <body>
@@ -39,8 +28,8 @@
       <div class="brand">
         <span class="badge-logo">PX</span>
         <div>
-          <div class="title">Pixopik Motion Studio <span class="pro-pill" id="verPill">v2.3</span></div>
-          <div class="subtitle" id="verSubtitle">Bandicam Bridge &amp; AE Hub</div>
+          <div class="title">Pixopik Motion Studio <span class="pro-pill" id="verPill">v3.0 EXE</span></div>
+          <div class="subtitle" id="verSubtitle">Native PixopikRecorder.exe • v3.0</div>
         </div>
       </div>
       <div class="header-right">
@@ -52,24 +41,26 @@
       </div>
     </header>
 
-    <div id="quickBanner" class="quick-banner">v2.3 Live • Real Bandicam Bridge + 31 HD Wallpapers + Sounds</div>
+    <div id="quickBanner" class="quick-banner">v3.0 Native .EXE • Bandicam Hollow Frame + F12 Hotkey</div>
 
-    <!-- CARD 1: CAPTURE STUDIO + REAL BANDICAM AUTO-RIG BRIDGE -->
+    <!-- CARD 1: OWN STANDALONE NATIVE PIXOPIKRECORDER.EXE -->
     <section class="card">
-      <div class="card-title">🎬 Screen Capture &amp; Bandicam Auto-Rig</div>
-      <button id="btnOpenRecorderStudio" class="btn-studio-hero">🚀 Open Pixopik Recorder Studio</button>
-      <button id="btnRealBandicamBridge" class="btn-bdcam-bridge">🎯 Record via Real Bandicam.exe + Auto-Rig AE</button>
+      <div class="card-title">🎬 Standalone Native Screen Recorder (.EXE)</div>
+      <button id="btnOpenRecorderStudio" class="btn-studio-hero">🚀 Launch PixopikRecorder.exe (Native App)</button>
 
       <button id="btnStop" class="btn btn-stop hidden" style="width:100%;margin-bottom:6px;">■ Stop Active Recording &amp; Rig</button>
-      <div id="recTimer" class="timer hidden">00:00 • Recording in Progress...</div>
+      <div id="recTimer" class="timer hidden">00:00 • Recording...</div>
 
       <div class="btn-row sub-actions" style="margin-top:4px;">
         <button id="btnRigLatest" class="btn btn-secondary">✨ Rig Latest MP4</button>
         <button id="btnImportTts" class="btn btn-secondary">🎙️ + Add TTS Voice</button>
       </div>
+      <div class="btn-row sub-actions" style="margin-top:5px;">
+        <button id="btnPinDesktopShortcut" class="btn btn-secondary" style="width:100%;">📌 Add Desktop Launcher Shortcut</button>
+      </div>
 
       <div id="ffmpegBar" class="ffmpeg-bar hidden">
-        <span>FFmpeg needed for built-in capture</span>
+        <span>FFmpeg needed for 60fps capture</span>
         <button id="btnInstallFfmpeg" class="btn-mini">⚡ Auto-Install</button>
       </div>
     </section>
@@ -110,27 +101,13 @@
     <input id="chromeUrlInput" type="text" value="https://pixopik.com" />
     <button id="btnLaunchChrome" type="button"></button>
     <button id="btnGhostBar" type="button"></button>
-    <select id="ghostDimSelect">
-      <option value="0" selected>0</option><option value="30">30</option><option value="50">50</option><option value="65">65</option>
-    </select>
-    <select id="modeSelect">
-      <option value="youtube_tutorial" selected>youtube_tutorial</option><option value="saas_promo">saas_promo</option>
-    </select>
-    <select id="cameraModeSelect">
-      <option value="smooth_travel" selected>smooth_travel</option><option value="click_bounce">click_bounce</option>
-    </select>
-    <select id="aspectSelect">
-      <option value="youtube_16_9" selected>youtube_16_9</option><option value="shorts_9_16">shorts_9_16</option><option value="square_1_1">square_1_1</option>
-    </select>
-    <select id="wallpaperSelect">
-      <option value="dark_carbon" selected>dark_carbon</option><option value="cosmic_indigo">cosmic_indigo</option><option value="ocean_breeze">ocean_breeze</option><option value="sunset_saas">sunset_saas</option><option value="clean_daylight">clean_daylight</option>
-    </select>
-    <select id="frameStyleSelect">
-      <option value="minimal_rounded" selected>minimal_rounded</option><option value="macos_glass">macos_glass</option><option value="sharp_clean">sharp_clean</option>
-    </select>
-    <select id="countdownSelect">
-      <option value="3" selected>3</option><option value="5">5</option><option value="0">0</option>
-    </select>
+    <select id="ghostDimSelect"><option value="0" selected>0</option><option value="30">30</option><option value="50">50</option><option value="65">65</option></select>
+    <select id="modeSelect"><option value="youtube_tutorial" selected>youtube_tutorial</option><option value="saas_promo">saas_promo</option></select>
+    <select id="cameraModeSelect"><option value="smooth_travel" selected>smooth_travel</option><option value="click_bounce">click_bounce</option></select>
+    <select id="aspectSelect"><option value="youtube_16_9" selected>youtube_16_9</option><option value="shorts_9_16">shorts_9_16</option><option value="square_1_1">square_1_1</option></select>
+    <select id="wallpaperSelect"><option value="dark_carbon" selected>dark_carbon</option><option value="cosmic_indigo">cosmic_indigo</option><option value="ocean_breeze">ocean_breeze</option><option value="sunset_saas">sunset_saas</option><option value="clean_daylight">clean_daylight</option></select>
+    <select id="frameStyleSelect"><option value="minimal_rounded" selected>minimal_rounded</option><option value="macos_glass">macos_glass</option><option value="sharp_clean">sharp_clean</option></select>
+    <select id="countdownSelect"><option value="3" selected>3</option><option value="5">5</option><option value="0">0</option></select>
     <input type="checkbox" id="chkAutoRigOnStop" checked />
     <input type="checkbox" id="chkClickSfx" checked />
     <input type="checkbox" id="chkAutoGhost" />

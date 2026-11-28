@@ -1,11 +1,10 @@
 {
-  "version": "2.3.0",
+  "version": "3.0.0",
   "repo": "thepixopik/after-effects-mcp",
   "branch": "main",
   "files": [
     "ota-manifest.json",
     "index.html",
-    "recorder-studio.html",
     "css/style.css",
     "js/auto-pref.js",
     "js/panel.js",
@@ -13,6 +12,7 @@
     "jsx/host.jsx",
     "jsx/pro-studio-rig.jsx",
     "jsx/steady-camera-v2.jsx",
+    "recorder/PixopikRecorder.cs",
     "recorder/capture-session.ps1",
     "recorder/ghost-presenter.ps1",
     "recorder/ghost-dimmer.ps1",
