@@ -26,11 +26,11 @@
 
   function syncBadges() {
     var pill = document.getElementById("verPill") || document.querySelector(".pro-pill");
-    if (pill) pill.textContent = "v3.4";
+    if (pill) pill.textContent = "v3.4.1";
     var verSub = document.getElementById("verSubtitle");
-    if (verSub) verSub.textContent = "550px Distance-Lock Dolly";
+    if (verSub) verSub.textContent = "Cursor Distance Dolly • v3.4.1";
     var qBan = document.getElementById("quickBanner");
-    if (qBan) qBan.textContent = "v3.4 Live • 550px Minimum Dolly Distance + Edge-Clamp";
+    if (qBan) qBan.textContent = "v3.4.1 Live • Corner-to-Corner Cursor Dolly (>=550px)";
   }
   syncBadges();
   setTimeout(syncBadges, 300);
@@ -54,8 +54,26 @@
     }
   }
 
+  var presetSel = document.getElementById("dollyDistPreset");
+  var customInp = document.getElementById("dollyDistCustom");
+  var applyBtn  = document.getElementById("btnApplyDollyDist");
+
+  function getSelectedMinPx() {
+    if (customInp && parseInt(customInp.value, 10) >= 80) return parseInt(customInp.value, 10);
+    try {
+      if (fs.existsSync(PREFS_FILE)) {
+        var p = JSON.parse(fs.readFileSync(PREFS_FILE, "utf8"));
+        if (p.minDollyPx) return parseInt(p.minDollyPx, 10);
+      }
+    } catch (_e) {}
+    return 550;
+  }
+
+  var applyingNow = false;
   function applyDollyDistanceToOpenComp(pxVal, autoSilent) {
-    var minPx = parseInt(pxVal, 10) || 550;
+    if (applyingNow) return;
+    applyingNow = true;
+    var minPx = parseInt(pxVal, 10) || getSelectedMinPx();
     try {
       var curP = fs.existsSync(PREFS_FILE) ? JSON.parse(fs.readFileSync(PREFS_FILE, "utf8")) : {};
       curP.minDollyPx = minPx;
@@ -63,12 +81,13 @@
     } catch (_ep) {}
 
     injectSteadyJsx(function () {
-      if (!window.__adobe_cep__) return;
-      window.__adobe_cep__.evalScript("$.global.PixopikApplyDollyDistance(" + minPx + ", 145)", function (raw) {
+      if (!window.__adobe_cep__) { applyingNow = false; return; }
+      window.__adobe_cep__.evalScript("$.global.PixopikApplyDollyDistance(" + minPx + ", 148)", function (raw) {
+        applyingNow = false;
         try {
           var r = JSON.parse(raw || "{}");
           if (r && r.ok) {
-            uiLog("📏 Applied " + r.minDistPx + "px Dolly Lock on " + r.compName + " (" + r.glides + " glides, " + r.lockedClicks + " small moves locked!)");
+            uiLog("🎥 Travel Dolly (" + r.minDistPx + "px lock) -> " + r.glides + " smooth glides applied on " + r.compName + "!");
           } else if (!autoSilent && r && r.error) {
             uiLog("Note: " + r.error);
           }
@@ -77,12 +96,28 @@
     });
   }
 
-  /* Auto-apply 550px Dolly Lock + Edge-Clamp right onto open YT_Tutorial_screen on v3.4 startup! */
-  setTimeout(function () { applyDollyDistanceToOpenComp(550, true); }, 900);
+  /* 1. Auto-apply immediately when v3.4.1 loads onto currently open YT_Tutorial_screen! */
+  setTimeout(function () { applyDollyDistanceToOpenComp(getSelectedMinPx(), true); }, 750);
 
-  var presetSel = document.getElementById("dollyDistPreset");
-  var customInp = document.getElementById("dollyDistCustom");
-  var applyBtn  = document.getElementById("btnApplyDollyDist");
+  /* 2. Watch #logList so EVERY time panel.js finishes 'Rigged in X.XXs', we auto-apply Cursor Distance Dolly! */
+  var logContainer = document.getElementById("logList");
+  if (logContainer && typeof MutationObserver !== "undefined") {
+    var obs = new MutationObserver(function (muts) {
+      for (var i = 0; i < muts.length; i++) {
+        var added = muts[i].addedNodes;
+        for (var j = 0; j < added.length; j++) {
+          var txt = added[j].textContent || "";
+          if (txt.indexOf("Rigged in ") !== -1) {
+            setTimeout(function () { applyDollyDistanceToOpenComp(getSelectedMinPx(), false); }, 140);
+            return;
+          }
+        }
+      }
+    });
+    obs.observe(logContainer, { childList: true });
+  }
+
+  /* 3. Wire UI controls & Fix Camera Shake button */
   if (presetSel && customInp) {
     presetSel.onchange = function () {
       customInp.value = presetSel.value;
@@ -90,8 +125,13 @@
     };
   }
   if (applyBtn && customInp) {
-    applyBtn.onclick = function () {
-      applyDollyDistanceToOpenComp(customInp.value, false);
+    applyBtn.onclick = function () { applyDollyDistanceToOpenComp(customInp.value, false); };
+  }
+  var fixBtn = document.getElementById("btnSmoothTravel");
+  if (fixBtn) {
+    fixBtn.onclick = function (ev) {
+      if (ev && ev.stopImmediatePropagation) ev.stopImmediatePropagation();
+      applyDollyDistanceToOpenComp(getSelectedMinPx(), false);
     };
   }
 
@@ -101,7 +141,6 @@
     lastRiggedSess = sessDir;
     try { if (fs.existsSync(DONE_SIG)) fs.unlinkSync(DONE_SIG); } catch (_e) {}
 
-    injectSteadyJsx();
     var prefs = {};
     try { if (fs.existsSync(PREFS_FILE)) prefs = JSON.parse(fs.readFileSync(PREFS_FILE, "utf8")); } catch (_ep) {}
     if (prefs.minDollyPx && customInp) customInp.value = String(prefs.minDollyPx);
@@ -171,34 +210,25 @@
     var csc = findCscCompiler();
     if (!csc || !fs.existsSync(CS_SRC)) { uiLog("Compiler missing: " + CS_SRC); return; }
 
-    cp.execFile("taskkill.exe", ["/F", "/IM", "PixopikRecorder_v33.exe"], function () {
-      cp.execFile("taskkill.exe", ["/F", "/IM", "PixopikRecorder_v34.exe"], function () {
-        var needBuild = !fs.existsSync(NATIVE_EXE);
-        if (!needBuild) {
-          try { needBuild = fs.statSync(CS_SRC).mtimeMs > fs.statSync(NATIVE_EXE).mtimeMs; } catch (_e) { needBuild = true; }
-        }
-
-        function spawnExe() {
-          var envCopy = Object.assign({}, process.env, { PIXOPIK_REC_ROOT: REC_ROOT });
-          cp.spawn(NATIVE_EXE, [], { detached: true, stdio: "ignore", cwd: REC_ROOT, env: envCopy }).unref();
-          uiLog("🚀 Launched PixopikRecorder v3.4 (with Min Dolly Distance Lock)!");
-        }
-
-        if (!needBuild) { spawnExe(); return; }
-
-        uiLog("⚡ Building PixopikRecorder v3.4...");
-        cp.execFile(csc, [
-          "/nologo", "/target:winexe", "/optimize+",
-          "/r:System.Windows.Forms.dll", "/r:System.Drawing.dll", "/r:System.dll",
-          "/out:" + NATIVE_EXE, CS_SRC
-        ], { timeout: 15000 }, function (err, stdout, stderr) {
-          if (err && !fs.existsSync(NATIVE_EXE)) {
-            uiLog("Compile error: " + (stderr || stdout || err.message));
-            return;
-          }
-          uiLog("✅ Ready: PixopikRecorder_v34.exe");
-          spawnExe();
-        });
+    cp.execFile("taskkill.exe", ["/F", "/IM", "PixopikRecorder_v34.exe"], function () {
+      var needBuild = !fs.existsSync(NATIVE_EXE);
+      if (!needBuild) {
+        try { needBuild = fs.statSync(CS_SRC).mtimeMs > fs.statSync(NATIVE_EXE).mtimeMs; } catch (_e) { needBuild = true; }
+      }
+      function spawnExe() {
+        var envCopy = Object.assign({}, process.env, { PIXOPIK_REC_ROOT: REC_ROOT });
+        cp.spawn(NATIVE_EXE, [], { detached: true, stdio: "ignore", cwd: REC_ROOT, env: envCopy }).unref();
+        uiLog("🚀 Launched PixopikRecorder v3.4.1!");
+      }
+      if (!needBuild) { spawnExe(); return; }
+      uiLog("⚡ Building PixopikRecorder...");
+      cp.execFile(csc, [
+        "/nologo", "/target:winexe", "/optimize+",
+        "/r:System.Windows.Forms.dll", "/r:System.Drawing.dll", "/r:System.dll",
+        "/out:" + NATIVE_EXE, CS_SRC
+      ], { timeout: 15000 }, function (err, stdout, stderr) {
+        if (err && !fs.existsSync(NATIVE_EXE)) { uiLog("Compile error: " + (stderr || stdout || err.message)); return; }
+        spawnExe();
       });
     });
   }
@@ -212,7 +242,7 @@
       var desk = path.join(os.homedir(), "Desktop", "Launch Pixopik Recorder.bat");
       try {
         fs.writeFileSync(desk, '@echo off\r\nset "PIXOPIK_REC_ROOT=' + REC_ROOT + '"\r\nstart "" "' + NATIVE_EXE + '"\r\n', "utf8");
-        uiLog("📌 Updated Desktop Shortcut to v3.4!");
+        uiLog("📌 Updated Desktop Shortcut!");
       } catch (e) { uiLog("Shortcut note: " + e.message); }
     };
   }
