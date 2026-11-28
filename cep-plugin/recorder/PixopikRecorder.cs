@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Net;
 using System.Text;
 using System.Drawing;
 using System.Diagnostics;
@@ -17,9 +18,10 @@ public class PixopikRecorderApp : Form {
   [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT r);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
 
-  public string recRoot, ffmpegExe, signalFile, prefsFile, bdDataDir;
+  public string recRoot, ffmpegExe, signalFile, prefsFile, portFile, bdDataDir;
   string capMode = "fullscreen";
   int cropX = 160, cropY = 120, cropW = 1280, cropH = 720;
   string selectedBgPath = "";
@@ -28,7 +30,7 @@ public class PixopikRecorderApp : Form {
   Process ffProc = null;
   Stopwatch recSw = new Stopwatch();
   Timer tickTimer = new Timer();
-  string curSessDir = "", curMp4Path = "", curErrLog = "";
+  string curSessDir = "", curMp4Path = "";
   List<string> sampleJson = new List<string>();
   List<string> clickJson = new List<string>();
   bool wasL = false, wasR = false;
@@ -42,16 +44,19 @@ public class PixopikRecorderApp : Form {
   HollowFrameForm rectFrame = null;
   MiniGhostBar miniBar = null;
 
-  public PixopikRecorderApp() {
-    recRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Videos", "PixopikRecordings");
+  public PixopikRecorderApp(string customRoot) {
+    recRoot = !string.IsNullOrWhiteSpace(customRoot)
+      ? customRoot
+      : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Videos", "PixopikRecordings");
     Directory.CreateDirectory(recRoot);
     Directory.CreateDirectory(Path.Combine(recRoot, "Screenshots"));
     signalFile = Path.Combine(recRoot, "native_done.signal");
     prefsFile  = Path.Combine(recRoot, "studio_v2_prefs.json");
+    portFile   = Path.Combine(recRoot, "ae_bridge_port.txt");
     bdDataDir  = Directory.Exists(@"C:\Program Files\Bandicam\data") ? @"C:\Program Files\Bandicam\data" : @"C:\Program Files (x86)\Bandicam\data";
     ffmpegExe  = FindFfmpegSafe();
 
-    Text = "Pixopik Screen Recorder Pro v3.2";
+    Text = "Pixopik Screen Recorder Pro v3.3";
     ClientSize = new Size(860, 520);
     MinimumSize = new Size(780, 480);
     StartPosition = FormStartPosition.CenterScreen;
@@ -114,8 +119,46 @@ public class PixopikRecorderApp : Form {
     return "";
   }
 
+  void NotifyAeInstant(string action, string sessionDir) {
+    try {
+      if (action == "auto_rig" && !string.IsNullOrEmpty(sessionDir)) {
+        File.WriteAllText(signalFile, sessionDir, new UTF8Encoding(false));
+      } else {
+        File.WriteAllText(Path.Combine(recRoot, "native_cmd.txt"), action, new UTF8Encoding(false));
+      }
+      if (File.Exists(portFile)) {
+        string port = File.ReadAllText(portFile).Trim();
+        int pNum;
+        if (int.TryParse(port, out pNum) && pNum > 0) {
+          var req = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:" + pNum + "/bridge");
+          req.Method = "POST";
+          req.ContentType = "application/json";
+          req.Timeout = 1500;
+          string safeSess = (sessionDir ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
+          byte[] bytes = Encoding.UTF8.GetBytes("{\"action\":\"" + action + "\",\"sessionDir\":\"" + safeSess + "\"}");
+          req.ContentLength = bytes.Length;
+          using (var st = req.GetRequestStream()) st.Write(bytes, 0, bytes.Length);
+          using (var resp = req.GetResponse()) {}
+        }
+      }
+    } catch {}
+  }
+
+  void BringAfterEffectsToFront() {
+    try {
+      foreach (var p in Process.GetProcesses()) {
+        try {
+          if (p.ProcessName.IndexOf("AfterFX", StringComparison.OrdinalIgnoreCase) >= 0 && p.MainWindowHandle != IntPtr.Zero) {
+            ShowWindow(p.MainWindowHandle, 9); // SW_RESTORE
+            SetForegroundWindow(p.MainWindowHandle);
+            break;
+          }
+        } catch {}
+      }
+    } catch {}
+  }
+
   void BuildBandicamUI() {
-    // 1. TOP ACTION BAR
     Panel top = new Panel { Dock = DockStyle.Top, Height = 68, BackColor = Color.FromArgb(16, 20, 29), Padding = new Padding(12, 10, 12, 10) };
 
     FlowLayoutPanel rightCluster = new FlowLayoutPanel {
@@ -167,23 +210,21 @@ public class PixopikRecorderApp : Form {
     cmbMode.SelectedIndexChanged += (s, e) => OnModeChanged();
 
     Button btnDraw = new Button { Text = "✏️ Draw", Width = 74, Height = 38, Margin = new Padding(2, 5, 4, 0), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(30, 38, 54), ForeColor = Color.White, Cursor = Cursors.Hand };
-    btnDraw.Click += (s, e) => SendCmdToAe("OPEN_GHOST");
+    btnDraw.Click += (s, e) => NotifyAeInstant("OPEN_GHOST", "");
 
     Button btnChr = new Button { Text = "🧼 Chrome", Width = 84, Height = 38, Margin = new Padding(2, 5, 0, 0), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(30, 38, 54), ForeColor = Color.White, Cursor = Cursors.Hand };
-    btnChr.Click += (s, e) => SendCmdToAe("OPEN_CHROME");
+    btnChr.Click += (s, e) => NotifyAeInstant("OPEN_CHROME", "");
 
     leftCluster.Controls.AddRange(new Control[] { cmbMode, btnDraw, btnChr });
     top.Controls.Add(rightCluster);
     top.Controls.Add(leftCluster);
 
-    // 2. FOOTER BAR
     lblFooter = new Label {
       Dock = DockStyle.Bottom, Height = 28, BackColor = Color.FromArgb(14, 18, 26),
       ForeColor = Color.FromArgb(148, 163, 184), TextAlign = ContentAlignment.MiddleLeft,
-      Text = "  Engine: Direct GDI 60 FPS (Hybrid-GPU Safe ✓)  •  FFmpeg: " + (string.IsNullOrEmpty(ffmpegExe) ? "MISSING!" : "Ready ✓") + "  •  " + recRoot
+      Text = "  Instant AE Socket Bridge v3.3  •  Stop (F12) Auto-Opens Composition in After Effects!"
     };
 
-    // 3. LEFT SIDEBAR RAIL (Correct Top-to-Bottom FlowOrder!)
     Panel nav = new Panel { Dock = DockStyle.Left, Width = 170, BackColor = Color.FromArgb(19, 24, 34), Padding = new Padding(8, 12, 8, 12) };
     FlowLayoutPanel navFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
     Button bHome = MakeNav("🏠  Get Started");
@@ -203,7 +244,6 @@ public class PixopikRecorderApp : Form {
     nav.Controls.Add(navFlow);
     nav.Controls.Add(chkHideOnRec);
 
-    // 4. CONTENT WORKSPACE
     Panel body = new Panel { Dock = DockStyle.Fill, Padding = new Padding(16) };
 
     paneHome = new Panel { Dock = DockStyle.Fill };
@@ -253,8 +293,8 @@ public class PixopikRecorderApp : Form {
       if (lstVideos.SelectedItem != null) {
         SavePrefsJson();
         string dir = Path.Combine(recRoot, lstVideos.SelectedItem.ToString().Split('|')[0].Trim());
-        File.WriteAllText(signalFile, dir, new UTF8Encoding(false));
-        lblSub.Text = "⚡ Sent to AE!";
+        NotifyAeInstant("auto_rig", dir);
+        BringAfterEffectsToFront();
       }
     };
     vidBtns.Controls.AddRange(new Control[] { bPlayVid, bRigVid });
@@ -323,10 +363,6 @@ public class PixopikRecorderApp : Form {
     p.Click += h; l1.Click += h; l2.Click += h;
     p.Controls.Add(l2); p.Controls.Add(l1);
     return p;
-  }
-
-  void SendCmdToAe(string cmd) {
-    try { File.WriteAllText(Path.Combine(recRoot, "native_cmd.txt"), cmd, new UTF8Encoding(false)); } catch {}
   }
 
   void RefreshWindows() {
@@ -472,9 +508,7 @@ public class PixopikRecorderApp : Form {
       curSessDir = Path.Combine(recRoot, "rec_" + DateTime.UtcNow.ToString("yyyy-MM-ddTHH-mm-ss-fffZ"));
       Directory.CreateDirectory(curSessDir);
       curMp4Path = Path.Combine(curSessDir, "screen.mp4");
-      curErrLog  = Path.Combine(curSessDir, "ffmpeg_err.txt");
 
-      // Proven 100% Hybrid-GPU-Safe Direct GDI 60 FPS Capture (Zero ddagrab crash, Zero pipe deadlock!)
       string vf = useCrop
         ? string.Format("crop={0}:{1}:{2}:{3},scale=trunc(iw/2)*2:trunc(ih/2)*2", rw, rh, rx, ry)
         : "scale=trunc(iw/2)*2:trunc(ih/2)*2";
@@ -483,16 +517,13 @@ public class PixopikRecorderApp : Form {
       var psi = new ProcessStartInfo {
         FileName = ffmpegExe,
         Arguments = string.Format("-y -nostats -loglevel error -f gdigrab -framerate 60 -draw_mouse 0 -i desktop -an -vf \"{0}\" -c:v libx264 -preset ultrafast -crf 20 -pix_fmt yuv420p -movflags +faststart \"{1}\"", vf, curMp4Path),
-        RedirectStandardInput = true,
-        RedirectStandardError = true,
-        UseShellExecute = false,
-        CreateNoWindow = true
+        RedirectStandardInput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true
       };
 
       ffProc = new Process { StartInfo = psi };
       ffProc.ErrorDataReceived += (s, ev) => { if (ev.Data != null) errSb.AppendLine(ev.Data); };
       ffProc.Start();
-      ffProc.BeginErrorReadLine(); // Async drain prevents 4KB stderr buffer deadlock!
+      ffProc.BeginErrorReadLine();
 
       System.Threading.Thread.Sleep(550);
       if (ffProc.HasExited) {
@@ -567,20 +598,23 @@ public class PixopikRecorderApp : Form {
     }
 
     string durStr = Math.Round(recSw.Elapsed.TotalSeconds, 3).ToString(CultureInfo.InvariantCulture);
-    string mot = "{\"version\":\"3.2.0\",\"fps\":60,\"captureMode\":\"" + capMode + "\",\"screenWidth\":" + cropW + ",\"screenHeight\":" + cropH + ",\"duration\":" + durStr + ",\"samples\":[" + string.Join(",", sampleJson) + "],\"clicks\":[" + string.Join(",", clickJson) + "]}";
+    string mot = "{\"version\":\"3.3.0\",\"fps\":60,\"captureMode\":\"" + capMode + "\",\"screenWidth\":" + cropW + ",\"screenHeight\":" + cropH + ",\"duration\":" + durStr + ",\"samples\":[" + string.Join(",", sampleJson) + "],\"clicks\":[" + string.Join(",", clickJson) + "]}";
     File.WriteAllText(Path.Combine(curSessDir, "motion.json"), mot, new UTF8Encoding(false));
     File.WriteAllText(Path.Combine(curSessDir, "done.signal"), "OK", new UTF8Encoding(false));
 
+    btnRec.Text = "● REC"; btnRec.BackColor = Color.FromArgb(225, 29, 72);
+    if (rectFrame != null && !rectFrame.IsDisposed) rectFrame.SetRecState(false);
+
     bool validMp4 = File.Exists(curMp4Path) && new FileInfo(curMp4Path).Length > 1024;
     if (chkAutoRig.Checked && validMp4) {
-      File.WriteAllText(signalFile, curSessDir, new UTF8Encoding(false));
+      lblSub.Text = "⚡ Opening in After Effects...";
+      WindowState = FormWindowState.Minimized;
+      BringAfterEffectsToFront();
+      NotifyAeInstant("auto_rig", curSessDir);
+    } else {
+      lblSub.Text = validMp4 ? "✅ Saved in Videos Tab!" : "⚠️ Capture too short";
+      WindowState = FormWindowState.Normal;
     }
-
-    btnRec.Text = "● REC"; btnRec.BackColor = Color.FromArgb(225, 29, 72);
-    lblSub.Text = validMp4 ? "✅ Saved & Sent to AE!" : "⚠️ Capture too short";
-    if (rectFrame != null && !rectFrame.IsDisposed) rectFrame.SetRecState(false);
-    WindowState = FormWindowState.Normal;
-    Activate();
   }
 
   void SavePrefsJson() {
@@ -608,7 +642,8 @@ public class PixopikRecorderApp : Form {
     try { SetProcessDPIAware(); } catch {}
     Application.EnableVisualStyles();
     Application.SetCompatibleTextRenderingDefault(false);
-    Application.Run(new PixopikRecorderApp());
+    string envRoot = Environment.GetEnvironmentVariable("PIXOPIK_REC_ROOT") ?? "";
+    Application.Run(new PixopikRecorderApp(envRoot));
   }
 }
 
