@@ -124,9 +124,6 @@
     return hiddenCount;
   }
 
-  /* =========================================================================
-   * UNWRAP ANY MUTED FocuSee_Edit_ PRECOMP SO ORIGINAL COMP + SFX PLAY 100%!
-   * ========================================================================= */
   function ensureBaseCompOpenAndUnmuted(comp) {
     if (comp.name.indexOf("FocuSee_Edit_") === 0 && comp.numLayers >= 1 && comp.layer(1).source instanceof CompItem) {
       var baseComp = comp.layer(1).source;
@@ -138,20 +135,84 @@
     return comp;
   }
 
+  /* =========================================================================
+   * ACCURATELY EXTRACT ALL CLICKS FROM:
+   *  1. Screen footage folder's motion.json (exact recorded clicks!)
+   *  2. 04_Vector_Cursor Scale pulse (baseS=140 -> 109.2, so < maxS * 0.88!)
+   *  3. 03_Click_Ripple_FX Opacity pulse (> 80%)
+   * ========================================================================= */
+  function extractAllClickTimes(comp, curLayer, ripLayer, scrLayer, explicitMotionObj) {
+    var clickTimes = [];
+
+    /* 1. Try motion.json right next to the imported screen.mp4 footage! */
+    var motObj = null;
+    if (scrLayer && scrLayer.source && scrLayer.source.file) {
+      try {
+        var siblingMotion = scrLayer.source.file.parent.fsName.replace(/\\/g, "/") + "/motion.json";
+        motObj = readJsonFileSafe(siblingMotion);
+      } catch (_em) {}
+    }
+    if (!motObj) motObj = explicitMotionObj;
+
+    if (motObj && motObj.clicks && motObj.clicks.length > 0) {
+      var lastM = -10;
+      for (var m = 0; m < motObj.clicks.length; m++) {
+        var mt = Number(motObj.clicks[m].t);
+        if (!isNaN(mt) && mt >= 0 && mt <= comp.duration && (mt - lastM) > 0.08) {
+          clickTimes.push(Math.round(mt * 1000) / 1000);
+          lastM = mt;
+        }
+      }
+    }
+
+    /* 2. Fallback: Vector Cursor scale down-pulses (140 -> 109.2 or 155 -> 120.9) */
+    if (clickTimes.length === 0 && curLayer) {
+      var cScl = curLayer.property("ADBE Transform Group").property("ADBE Scale");
+      var maxScale = 100;
+      for (var s1 = 1; s1 <= cScl.numKeys; s1++) {
+        var sv = cScl.keyValue(s1)[0];
+        if (sv > maxScale) maxScale = sv;
+      }
+      var thresh = maxScale * 0.88; /* 140 * 0.88 = 123.2 > 109.2 -> catches 100% of clicks! */
+      var prevT = -10;
+      for (var ck = 1; ck <= cScl.numKeys; ck++) {
+        var kv = cScl.keyValue(ck)[0], kt = cScl.keyTime(ck);
+        if (kv < thresh && (kt - prevT) > 0.14) {
+          clickTimes.push(Math.round(kt * 1000) / 1000);
+          prevT = kt;
+        }
+      }
+    }
+
+    /* 3. Fallback: Ripple layer opacity peaks */
+    if (clickTimes.length === 0 && ripLayer) {
+      var rOp = ripLayer.property("ADBE Transform Group").property("ADBE Opacity");
+      var prevR = -10;
+      for (var rk = 1; rk <= rOp.numKeys; rk++) {
+        if (rOp.keyValue(rk) > 80 && (rOp.keyTime(rk) - prevR) > 0.2) {
+          clickTimes.push(Math.round(rOp.keyTime(rk) * 1000) / 1000);
+          prevR = rOp.keyTime(rk);
+        }
+      }
+    }
+
+    return { clickTimes: clickTimes, motionObj: motObj };
+  }
+
   function applyFocuSee3LayerEngine(rawComp, opts) {
     opts = opts || {};
     var comp = ensureBaseCompOpenAndUnmuted(rawComp);
 
-    var camNull = null, curLayer = null, scrLayer = null;
+    var camNull = null, curLayer = null, ripLayer = null, scrLayer = null;
     for (var l = 1; l <= comp.numLayers; l++) {
       var lyr = comp.layer(l);
       if (lyr.name === "05_Smart_Camera_Rig") camNull = lyr;
       if (lyr.name === "04_Vector_Cursor") curLayer = lyr;
+      if (lyr.name === "03_Click_Ripple_FX") ripLayer = lyr;
       if (!scrLayer && (lyr.name.indexOf("Screen") !== -1 || lyr.name.indexOf("screen.mp4") !== -1 || lyr.name.indexOf("02_") === 0) && lyr.width > 200) {
         scrLayer = lyr;
       }
-      /* Ensure existing Click SFX layer is NEVER muted! */
-      if (lyr.name.indexOf("SFX") !== -1) {
+      if (lyr.name.indexOf("SFX") !== -1 || lyr.name.indexOf("Voiceover") !== -1) {
         lyr.audioEnabled = true;
       }
     }
@@ -163,7 +224,10 @@
     var enableBlur    = opts.threeWayBlur !== false;
     var enableTyping  = opts.typingHide !== false;
 
-    var motionObj = opts.motionPath ? readJsonFileSafe(opts.motionPath) : null;
+    var extMotion = opts.motionPath ? readJsonFileSafe(opts.motionPath) : null;
+    var extracted = extractAllClickTimes(comp, curLayer, ripLayer, scrLayer, extMotion);
+    var clickTimes = extracted.clickTimes;
+    var motionObj  = extracted.motionObj;
     var typingBursts = (motionObj && motionObj.typingBursts) ? motionObj.typingBursts : [];
 
     try {
@@ -209,16 +273,6 @@
     }
 
     var cPos = curLayer.property("ADBE Transform Group").property("ADBE Position");
-    var cScl = curLayer.property("ADBE Transform Group").property("ADBE Scale");
-    var clickTimes = [];
-    var prevClickT = -10;
-    for (var ck = 1; ck <= cScl.numKeys; ck++) {
-      var kv = cScl.keyValue(ck), kt = cScl.keyTime(ck);
-      if (kv[0] < 92 && (kt - prevClickT) > 0.22) {
-        clickTimes.push(Math.round(kt * 1000) / 1000);
-        prevClickT = kt;
-      }
-    }
 
     function hasNearbyClick(tStart, tEnd) {
       for (var c = 0; c < clickTimes.length; c++) {
@@ -368,7 +422,6 @@
     };
   }
 
-  /* Injects or refreshes 07_Mouse_Click_SFX with exact original Click (-2.5dB) + Soft Velvet Whoosh (-4dB)! */
   $.global.PixopikInjectStudioSfxWav = function (wavPathStr) {
     if (!app.project) return '{"ok":false}';
     var comp = app.project.activeItem;
@@ -381,7 +434,7 @@
     var wf = new File(wavPathStr);
     if (!wf.exists) return '{"ok":false,"error":"WAV missing"}';
 
-    app.beginUndoGroup("Restore Original Studio Click + Whoosh SFX");
+    app.beginUndoGroup("Inject Studio Click + Whoosh SFX");
     try {
       for (var l = comp.numLayers; l >= 1; l--) {
         var nm = comp.layer(l).name || "";
@@ -394,8 +447,9 @@
       aLyr.name = "07_Mouse_Click_SFX";
       aLyr.startTime = 0;
       aLyr.audioEnabled = true;
+      aLyr.solo = false;
       try {
-        aLyr.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([-2.5, -2.5]);
+        aLyr.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([-1.5, -1.5]);
       } catch (_ea) {}
       return '{"ok":true,"layer":"07_Mouse_Click_SFX"}';
     } catch (e) {
@@ -414,7 +468,7 @@
       }
     }
     if (!comp || !(comp instanceof CompItem)) return '{"ok":false,"error":"Open a composition first!"}';
-    app.beginUndoGroup("Apply Pixopik v4.0.1 FocuSee + Original SFX");
+    app.beginUndoGroup("Apply Pixopik v4.0.2 FocuSee + Verified SFX");
     try {
       var opts = {};
       if (typeof b64OrJsonOpts === "string" && b64OrJsonOpts.length > 1) {

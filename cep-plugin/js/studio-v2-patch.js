@@ -18,7 +18,7 @@
   var STEADY_JSX  = path.join(EXT_ROOT, "jsx", "steady-camera-v2.jsx");
   var CS_SRC      = path.join(EXT_ROOT, "recorder", "PixopikRecorder.cs");
   var REC_ROOT    = path.join(process.env.USERPROFILE || os.homedir(), "Videos", "PixopikRecordings");
-  var NATIVE_EXE  = path.join(REC_ROOT, "PixopikRecorder_v401.exe");
+  var NATIVE_EXE  = path.join(REC_ROOT, "PixopikRecorder_v402.exe");
   var DONE_SIG    = path.join(REC_ROOT, "native_done.signal");
   var PORT_FILE   = path.join(REC_ROOT, "ae_bridge_port.txt");
   var PREFS_FILE  = path.join(REC_ROOT, "studio_v2_prefs.json");
@@ -26,11 +26,11 @@
 
   function syncBadges() {
     var pill = document.getElementById("verPill") || document.querySelector(".pro-pill");
-    if (pill) pill.textContent = "v4.0.1";
+    if (pill) pill.textContent = "v4.0.2";
     var verSub = document.getElementById("verSubtitle");
-    if (verSub) verSub.textContent = "Original SFX + FocuSee • v4.0.1";
+    if (verSub) verSub.textContent = "Verified Click + Whoosh SFX • v4.0.2";
     var qBan = document.getElementById("quickBanner");
-    if (qBan) qBan.textContent = "v4.0.1 Live • Original Click (-2.5dB) + Velvet Whoosh (-4dB) Restored!";
+    if (qBan) qBan.textContent = "v4.0.2 Live • Fixed 140% Cursor Scale SFX Bug (100% Audible!)";
   }
   syncBadges();
   setTimeout(syncBadges, 300);
@@ -46,7 +46,7 @@
   }
 
   /* =========================================================================
-   * EXACT ORIGINAL TACTILE CLICK (-2.5 dB) + SUBTLE VELVET AIR SWISH (-4 dB)!
+   * PEAK-NORMALIZED ORIGINAL TACTILE CLICK + SOFT VELVET AIR SWISH!
    * ========================================================================= */
   function buildOriginalClickAndVelvetWhooshWav(clickTimes, whooshTimes, durationSec, outWavPath) {
     var sr = 22050;
@@ -54,7 +54,7 @@
     var totalSamples = Math.ceil(dur * sr);
     var pcm = new Int16Array(totalSamples);
 
-    /* 1. Exact Original Tactile Mechanical Click Template (85ms: 1550Hz + 420Hz + 1950Hz release) */
+    /* 1. Exact Original Tactile Mechanical Click (0.90 peak = clear crisp click!) */
     var clkLen = Math.floor(sr * 0.085);
     var clkTpl = new Int16Array(clkLen);
     for (var j = 0; j < clkLen; j++) {
@@ -65,28 +65,32 @@
         var lt2 = lt - 0.046;
         w += Math.sin(6.283185 * 1950 * lt2) * Math.exp(-lt2 * 280) * 0.22;
       }
-      var s = Math.max(-1, Math.min(1, w * 0.85));
+      var s = Math.max(-1, Math.min(1, w * 0.92));
       clkTpl[j] = Math.round(s * 32767);
     }
 
-    /* 2. Exact Subtle Soft Velvet Air Swish Template (260ms warm low-passed velvet air, zero harsh hiss!) */
+    /* 2. Peak-Normalized Subtle Velvet Air Swish (0.28 normalized peak = soft audible swish!) */
     var swLen = Math.floor(sr * 0.26);
-    var swTpl = new Int16Array(swLen);
-    var lp1 = 0, lp2 = 0, seed = 1337;
+    var rawSw = new Float64Array(swLen);
+    var lp1 = 0, lp2 = 0, seed = 1337, maxPeak = 0.0001;
     for (var m = 0; m < swLen; m++) {
       var u = m / swLen;
       seed = (seed * 16807) % 2147483647;
       var white = ((seed / 1073741823.5) - 1.0);
-      /* Warm sweeping low-pass filter (gentle velvet air breath) */
-      var alpha = 0.06 + 0.14 * Math.sin(Math.PI * u);
+      var alpha = 0.07 + 0.16 * Math.sin(Math.PI * u);
       lp1 += alpha * (white - lp1);
       lp2 += alpha * (lp1 - lp2);
-      var env = Math.pow(Math.sin(Math.PI * u), 1.85);
-      var sw = Math.max(-1, Math.min(1, lp2 * env * 0.42));
-      swTpl[m] = Math.round(sw * 32767);
+      var env = Math.pow(Math.sin(Math.PI * u), 1.75);
+      rawSw[m] = lp2 * env;
+      if (Math.abs(rawSw[m]) > maxPeak) maxPeak = Math.abs(rawSw[m]);
+    }
+    var swTpl = new Int16Array(swLen);
+    for (var m2 = 0; m2 < swLen; m2++) {
+      var norm = (rawSw[m2] / maxPeak) * 0.28; /* Guaranteed -11 dB soft velvet swish! */
+      swTpl[m2] = Math.round(Math.max(-1, Math.min(1, norm)) * 32767);
     }
 
-    var placed = 0;
+    var clicksPlaced = 0, whooshesPlaced = 0;
     var lastC = -1;
     var cArr = clickTimes || [];
     for (var c = 0; c < cArr.length; c++) {
@@ -100,7 +104,7 @@
         var sum = pcm[i0 + k] + clkTpl[k];
         pcm[i0 + k] = sum > 32767 ? 32767 : (sum < -32768 ? -32768 : sum);
       }
-      placed++;
+      clicksPlaced++;
     }
 
     var lastW = -1;
@@ -116,10 +120,10 @@
         var sum2 = pcm[wi0 + mk] + swTpl[mk];
         pcm[wi0 + mk] = sum2 > 32767 ? 32767 : (sum2 < -32768 ? -32768 : sum2);
       }
-      placed++;
+      whooshesPlaced++;
     }
 
-    if (placed === 0) return null;
+    if (clicksPlaced === 0 && whooshesPlaced === 0) return null;
 
     var dataByteLen = pcm.byteLength;
     var wav = Buffer.alloc(44 + dataByteLen);
@@ -130,7 +134,7 @@
     wav.writeUInt32LE(dataByteLen, 40);
     Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).copy(wav, 44);
     fs.writeFileSync(outWavPath, wav);
-    return outWavPath;
+    return { path: outWavPath, clicks: clicksPlaced, whooshes: whooshesPlaced };
   }
 
   function injectSteadyJsx(cb) {
@@ -205,15 +209,14 @@
         try {
           var r = JSON.parse(raw || "{}");
           if (r && r.ok) {
-            /* Immediately build & inject the exact Original Click (-2.5dB) + Velvet Whoosh (-4dB) WAV! */
-            if (wantSfx && ((r.clickTimes && r.clickTimes.length > 0) || (r.whooshTimes && r.whooshTimes.length > 0))) {
+            if (wantSfx) {
               var outWav = path.join(REC_ROOT, "studio_sfx_" + Date.now() + ".wav");
               var built = buildOriginalClickAndVelvetWhooshWav(r.clickTimes || [], r.whooshTimes || [], r.duration || 15, outWav);
-              if (built) {
-                var safeW = built.replace(/\\/g, "/");
+              if (built && built.path) {
+                var safeW = built.path.replace(/\\/g, "/");
                 window.__adobe_cep__.evalScript('$.global.PixopikInjectStudioSfxWav("' + safeW + '")', function () {
                   applyingNow = false;
-                  uiLog("🔊 Original Click (-2.5dB) + Velvet Whoosh (-4dB) SFX + FocuSee Dolly restored on " + r.compName + "!");
+                  uiLog("🔊 SFX Active (" + built.clicks + " Clicks + " + built.whooshes + " Soft Whooshes) on " + r.compName + "!");
                 });
                 return;
               }
@@ -230,8 +233,8 @@
     });
   }
 
-  /* 1. Immediately unwrap any muted precomp & restore exact Original SFX right on v4.0.1 Sync! */
-  setTimeout(function () { applyFocuSeeAndOriginalSfx(getSelectedMinPx(), true); }, 700);
+  /* 1. Auto-restore audible Click + Velvet Whoosh SFX immediately on v4.0.2 Sync! */
+  setTimeout(function () { applyFocuSeeAndOriginalSfx(getSelectedMinPx(), true); }, 650);
 
   /* 2. Auto-apply after every 'Rigged in X.XXs' import */
   var lastSessMotion = "";
@@ -349,8 +352,8 @@
     var csc = findCscCompiler();
     if (!csc || !fs.existsSync(CS_SRC)) { uiLog("Compiler missing: " + CS_SRC); return; }
 
-    cp.execFile("taskkill.exe", ["/F", "/IM", "PixopikRecorder_v40.exe"], function () {
-      cp.execFile("taskkill.exe", ["/F", "/IM", "PixopikRecorder_v401.exe"], function () {
+    cp.execFile("taskkill.exe", ["/F", "/IM", "PixopikRecorder_v401.exe"], function () {
+      cp.execFile("taskkill.exe", ["/F", "/IM", "PixopikRecorder_v402.exe"], function () {
         var needBuild = !fs.existsSync(NATIVE_EXE);
         if (!needBuild) {
           try { needBuild = fs.statSync(CS_SRC).mtimeMs > fs.statSync(NATIVE_EXE).mtimeMs; } catch (_e) { needBuild = true; }
@@ -358,17 +361,16 @@
         function spawnExe() {
           var envCopy = Object.assign({}, process.env, { PIXOPIK_REC_ROOT: REC_ROOT });
           cp.spawn(NATIVE_EXE, [], { detached: true, stdio: "ignore", cwd: REC_ROOT, env: envCopy }).unref();
-          uiLog("🚀 Launched PixopikRecorder v4.0.1 (Original SFX + FocuSee)!");
+          uiLog("🚀 Launched PixopikRecorder v4.0.2!");
         }
         if (!needBuild) { spawnExe(); return; }
-        uiLog("⚡ Building PixopikRecorder v4.0.1...");
+        uiLog("⚡ Building PixopikRecorder v4.0.2...");
         cp.execFile(csc, [
           "/nologo", "/target:winexe", "/optimize+",
           "/r:System.Windows.Forms.dll", "/r:System.Drawing.dll", "/r:System.dll",
           "/out:" + NATIVE_EXE, CS_SRC
         ], { timeout: 15000 }, function (err, stdout, stderr) {
           if (err && !fs.existsSync(NATIVE_EXE)) { uiLog("Compile error: " + (stderr || stdout || err.message)); return; }
-          uiLog("✅ Ready: PixopikRecorder_v401.exe");
           spawnExe();
         });
       });
@@ -384,7 +386,7 @@
       var desk = path.join(os.homedir(), "Desktop", "Launch Pixopik Recorder.bat");
       try {
         fs.writeFileSync(desk, '@echo off\r\nset "PIXOPIK_REC_ROOT=' + REC_ROOT + '"\r\nstart "" "' + NATIVE_EXE + '"\r\n', "utf8");
-        uiLog("📌 Updated Desktop Shortcut to v4.0.1!");
+        uiLog("📌 Updated Desktop Shortcut to v4.0.2!");
       } catch (e) { uiLog("Shortcut note: " + e.message); }
     };
   }
