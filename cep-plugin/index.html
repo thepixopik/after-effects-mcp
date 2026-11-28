@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Pixopik Motion Studio Pro v4.0.1</title>
+  <title>Pixopik Motion Studio Pro v5.0</title>
   <link rel="stylesheet" href="./css/style.css" />
   <style>
     .header-right { display: flex; align-items: center; gap: 6px; }
@@ -13,30 +13,43 @@
     }
     .btn-sync:hover { background: #4f46e5; color: #ffffff; border-color: #6366f1; }
     .btn-studio-hero {
-      width: 100%; padding: 12px 14px; font-size: 13px; font-weight: 800;
-      border-radius: 9px; border: 1px solid #38bdf8; cursor: pointer;
+      width: 100%; padding: 11px 12px; font-size: 12.5px; font-weight: 800;
+      border-radius: 8px; border: 1px solid #38bdf8; cursor: pointer;
       background: linear-gradient(135deg, #0284c7 0%, #4f46e5 100%);
-      color: #ffffff; box-shadow: 0 4px 16px rgba(14, 165, 233, 0.38);
-      margin-bottom: 7px; transition: all 0.15s ease;
+      color: #ffffff; box-shadow: 0 4px 14px rgba(14, 165, 233, 0.32);
+      margin-bottom: 6px; transition: all 0.15s ease;
     }
-    .btn-studio-hero:hover { filter: brightness(1.1); transform: translateY(-1px); }
-    .dolly-bar {
-      display: flex; gap: 6px; align-items: center; margin-top: 6px;
-      background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 7px 8px;
+    .btn-studio-hero:hover { filter: brightness(1.1); }
+    .btn-master-all {
+      width: 100%; padding: 10px 12px; font-size: 12px; font-weight: 800;
+      border-radius: 8px; border: 1px solid #a855f7; cursor: pointer;
+      background: linear-gradient(135deg, #7c3aed 0%, #db2777 100%);
+      color: #ffffff; margin-bottom: 8px;
     }
-    .dolly-bar input[type="number"] {
-      width: 64px; background: #1e293b; color: #38bdf8; border: 1px solid #475569;
-      border-radius: 6px; padding: 5px 5px; font-size: 12px; font-weight: 800; text-align: center;
+    .btn-master-all:hover { filter: brightness(1.12); }
+    .mod-box {
+      background: #0f172a; border: 1px solid #1e293b; border-radius: 8px;
+      padding: 8px 9px; margin-bottom: 7px;
     }
-    .dolly-bar select {
-      flex: 1; background: #1e293b; color: #f8fafc; border: 1px solid #475569;
-      border-radius: 6px; padding: 5px 6px; font-size: 11.2px; font-weight: 700;
+    .mod-head {
+      font-size: 11px; font-weight: 800; color: #38bdf8; margin-bottom: 5px;
+      display: flex; justify-content: space-between; align-items: center;
     }
-    .focusee-checks {
-      display: flex; flex-direction: column; gap: 5px; margin-top: 8px;
-      font-size: 11px; color: #cbd5e1;
+    .mod-row { display: flex; gap: 5px; align-items: center; margin-top: 5px; }
+    .mod-row select, .mod-row input[type="number"] {
+      background: #1e293b; color: #f8fafc; border: 1px solid #334155;
+      border-radius: 6px; padding: 4px 6px; font-size: 11px; font-weight: 700;
     }
-    .focusee-checks label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+    .mod-row select { flex: 1; }
+    .mod-row input[type="number"] { width: 62px; text-align: center; color: #38bdf8; }
+    .mod-checks { display: flex; gap: 10px; flex-wrap: wrap; font-size: 10.5px; color: #cbd5e1; margin-top: 5px; }
+    .mod-checks label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+    .btn-act {
+      background: #334155; color: #f8fafc; border: 1px solid #475569;
+      border-radius: 6px; padding: 5px 9px; font-size: 11px; font-weight: 700; cursor: pointer;
+    }
+    .btn-act.pri { background: #4f46e5; border-color: #6366f1; color: #fff; }
+    .btn-act:hover { filter: brightness(1.12); }
   </style>
 </head>
 <body>
@@ -45,8 +58,8 @@
       <div class="brand">
         <span class="badge-logo">PX</span>
         <div>
-          <div class="title">Pixopik Motion Studio <span class="pro-pill" id="verPill">v4.0.1</span></div>
-          <div class="subtitle" id="verSubtitle">Original SFX + FocuSee • v4.0.1</div>
+          <div class="title">Pixopik Motion Studio <span class="pro-pill" id="verPill">v5.0</span></div>
+          <div class="subtitle" id="verSubtitle">Raw Capture &rarr; Post-FX Studio</div>
         </div>
       </div>
       <div class="header-right">
@@ -58,57 +71,104 @@
       </div>
     </header>
 
-    <div id="quickBanner" class="quick-banner">v4.0.1 Live • Original Click + Velvet Whoosh SFX Restored!</div>
+    <div id="quickBanner" class="quick-banner">v5.0 Studio • Step 1: Normal Raw Record &rarr; Step 2: Apply Post-FX!</div>
 
-    <!-- CARD 1: STANDALONE NATIVE RECORDER -->
+    <!-- STEP 1: SIMPLE NORMAL RAW RECORDER -->
     <section class="card">
-      <div class="card-title">🎬 Standalone Native Screen Recorder (.EXE)</div>
-      <button id="btnOpenRecorderStudio" class="btn-studio-hero">🚀 Launch PixopikRecorder v4.0.1 (.EXE)</button>
-
-      <button id="btnStop" class="btn btn-stop hidden" style="width:100%;margin-bottom:6px;">■ Stop Active Recording &amp; Rig</button>
-      <div id="recTimer" class="timer hidden">00:00 • Recording...</div>
-
-      <div class="btn-row sub-actions" style="margin-top:4px;">
-        <button id="btnRigLatest" class="btn btn-secondary">✨ Rig Latest MP4</button>
-        <button id="btnImportTts" class="btn btn-secondary">🎙️ + Add TTS Voice</button>
+      <div class="card-title">1️⃣ Step 1: Clean Normal Screen Capture</div>
+      <button id="btnOpenRecorderStudio" class="btn-studio-hero">🔴 Open Simple Raw Recorder (.EXE)</button>
+      <div class="btn-row sub-actions">
+        <button id="btnImportRawFlat" class="btn btn-secondary" title="Import latest MP4 flat with 0% zoom">📥 Import Raw Clip (Flat)</button>
+        <button id="btnImportTts" class="btn btn-secondary">🎙️ + Add Voiceover</button>
       </div>
-      <div class="btn-row sub-actions" style="margin-top:5px;">
-        <button id="btnPinDesktopShortcut" class="btn btn-secondary" style="width:100%;">📌 Update Desktop Launcher Shortcut</button>
-      </div>
-
       <div id="ffmpegBar" class="ffmpeg-bar hidden">
         <span>FFmpeg needed for 60fps capture</span>
         <button id="btnInstallFfmpeg" class="btn-mini">⚡ Auto-Install</button>
       </div>
     </section>
 
-    <!-- CARD 2: FOCUSEE 3-LAYER CAMERA & ORIGINAL SFX -->
+    <!-- STEP 2: MODULAR POST-PRODUCTION FX STUDIO -->
     <section class="card">
-      <div class="card-title">🌀 FocuSee Camera + Original Studio SFX</div>
-      <div style="font-size:10.5px;color:#94a3b8;">Click = Zoom • Move &ge; px = Dolly • Original Click + Soft Whoosh SFX</div>
-      <div class="dolly-bar">
-        <select id="dollyDistPreset">
-          <option value="350">Move &ge; 350 px</option>
-          <option value="550" selected>Move &ge; 550 px (Pro)</option>
-          <option value="800">Move &ge; 800 px (Wide)</option>
-          <option value="1050">Move &ge; 1050 px</option>
-        </select>
-        <input id="dollyDistCustom" type="number" min="100" max="1800" step="50" value="550" title="Minimum Cursor Distance in Pixels" />
-        <button id="btnApplyDollyDist" class="btn-mini" style="background:#4f46e5;color:#fff;padding:6px 10px;">Apply</button>
+      <div class="card-title">2️⃣ Step 2: Post-Production FX Studio</div>
+
+      <button id="btnApplyAllPostFx" class="btn-master-all">⚡ 1-Click Apply ALL Pro FX (Dolly + Blur + SFX)</button>
+
+      <!-- MODULE A: CAMERA ZOOM & DOLLY -->
+      <div class="mod-box">
+        <div class="mod-head"><span>🎥 Camera: Click-Zoom + Cursor Dolly</span></div>
+        <div class="mod-row">
+          <select id="postZoomSelect">
+            <option value="135">135% Gentle</option>
+            <option value="148" selected>148% Pro Zoom</option>
+            <option value="168">168% Close-Up</option>
+          </select>
+          <input id="dollyDistCustom" type="number" min="100" max="1800" step="50" value="550" title="Min Cursor Move Distance (px)" />
+          <span style="font-size:10px;color:#94a3b8;">px</span>
+        </div>
+        <div class="mod-checks">
+          <label><input type="checkbox" id="chkClickZoomPunch" checked /> Click = Zoom Punch</label>
+          <label><input type="checkbox" id="chkTypingHide" checked /> Typing = Hide Cursor</label>
+        </div>
+        <div class="mod-row">
+          <button id="btnApplyCameraOnly" class="btn-act pri" style="flex:1;">🎥 Apply Camera FX</button>
+          <button id="btnResetCameraFlat" class="btn-act" title="Remove all camera zoom/dolly">📌 Flat 100%</button>
+        </div>
       </div>
-      <div class="focusee-checks">
-        <label><input type="checkbox" id="chkOrigSfx" checked /> 🔊 <b>Original Tactile Click (-2.5dB) + Soft Velvet Whoosh (-4dB)</b></label>
-        <label><input type="checkbox" id="chkClickZoomPunch" checked /> 🎯 <b>Click = Zoom Focus</b> (148% &rarr; 165% Punch on Click)</label>
-        <label><input type="checkbox" id="chk3WayBlur" checked /> 🌀 <b>3-Way Motion Blur</b> (190&deg; Zoom + Dolly + Cursor + Typing)</label>
-        <label><input type="checkbox" id="chkTypingHide" checked /> ⌨️ <b>Typing Focus + Auto-Hide Idle Cursor</b> (Zero Audio Mute!)</label>
+
+      <!-- MODULE B: 3-WAY OPTICAL MOTION BLUR -->
+      <div class="mod-box">
+        <div class="mod-head"><span>🌀 Optical Motion Blur (Zoom + Dolly + Cursor)</span></div>
+        <div class="mod-row">
+          <select id="postShutterSelect">
+            <option value="140">140&deg; Subtle Blur</option>
+            <option value="190" selected>190&deg; FocuSee Cinema</option>
+            <option value="260">260&deg; Heavy Blur</option>
+          </select>
+          <button id="btnBlurOn" class="btn-act pri">🌀 Blur ON</button>
+          <button id="btnBlurOff" class="btn-act">OFF</button>
+        </div>
+      </div>
+
+      <!-- MODULE C: STUDIO CLICK + WHOOSH SFX -->
+      <div class="mod-box">
+        <div class="mod-head"><span>🔊 Studio Sound FX (Independent Layer)</span></div>
+        <div class="mod-checks">
+          <label><input type="checkbox" id="chkSfxClicks" checked /> Tactile Clicks</label>
+          <label><input type="checkbox" id="chkSfxWhoosh" checked /> Soft Velvet Whoosh</label>
+        </div>
+        <div class="mod-row">
+          <select id="postSfxVol">
+            <option value="0">🔊 Loud (0 dB)</option>
+            <option value="-1.5" selected>🔉 Balanced (-1.5 dB)</option>
+            <option value="-5">🔈 Subtle (-5 dB)</option>
+          </select>
+          <button id="btnApplySfxOnly" class="btn-act pri">🔊 Add / Refresh SFX</button>
+          <button id="btnRemoveSfx" class="btn-act">🔇</button>
+        </div>
+      </div>
+
+      <!-- MODULE D: STUDIO LOOK / WALLPAPER -->
+      <div class="mod-box" style="margin-bottom:0;">
+        <div class="mod-head"><span>🖼️ Layout &amp; Wallpaper</span></div>
+        <div class="mod-row">
+          <select id="uiLayoutPreset">
+            <option value="youtube_tutorial" selected>🎓 YT Big (95%)</option>
+            <option value="saas_promo">🚀 SaaS Glass (84%)</option>
+          </select>
+          <select id="uiWallPreset">
+            <option value="dark_carbon" selected>🖤 Carbon</option>
+            <option value="cosmic_indigo">🌌 Indigo</option>
+            <option value="ocean_breeze">🌊 Ocean</option>
+            <option value="sunset_saas">🔥 Sunset</option>
+          </select>
+        </div>
       </div>
     </section>
 
-    <!-- CARD 3: TIMELINE POLISH -->
+    <!-- STEP 3: EXTRA OVERLAYS -->
     <section class="card">
-      <div class="card-title">✨ Timeline Polish &amp; Creator Actions</div>
+      <div class="card-title">3️⃣ Extra Timeline Overlays</div>
       <div class="grid-btns">
-        <button id="btnSmoothTravel" class="btn btn-chip accent-chip">🔊 Restore SFX + Dolly</button>
         <button id="btnSubscribe" class="btn btn-chip accent-chip">🔔 + YT Subscribe</button>
         <button id="btnChapter" class="btn btn-chip">📑 + YT Chapter</button>
         <button id="btnSpotlight" class="btn btn-chip">💡 + Spotlight</button>
@@ -116,6 +176,7 @@
         <button id="btnCallout" class="btn btn-chip">⌨️ + Shortcut Badge</button>
         <button id="btnShorts" class="btn btn-chip">📱 Make 9:16 Short</button>
         <button id="btn3dTilt" class="btn btn-chip">🎲 3D Showcase Tilt</button>
+        <button id="btnPinDesktopShortcut" class="btn btn-chip">📌 Desktop Icon</button>
       </div>
     </section>
 
@@ -135,22 +196,26 @@
     </section>
   </div>
 
-  <!-- HIDDEN INTERNAL BRIDGE ELEMENTS -->
+  <!-- HIDDEN INTERNAL BRIDGE ELEMENTS FOR panel.js -->
   <div id="internalStudioState" style="display:none !important;" aria-hidden="true">
     <input id="chromeUrlInput" type="text" value="https://pixopik.com" />
     <button id="btnLaunchChrome" type="button"></button>
     <button id="btnGhostBar" type="button"></button>
-    <select id="ghostDimSelect"><option value="0" selected>0</option><option value="30">30</option><option value="50">50</option><option value="65">65</option></select>
+    <button id="btnRigLatest" type="button"></button>
+    <button id="btnSmoothTravel" type="button"></button>
+    <button id="btnStop" type="button"></button>
+    <div id="recTimer"></div>
+    <select id="ghostDimSelect"><option value="0" selected>0</option></select>
     <select id="modeSelect"><option value="youtube_tutorial" selected>youtube_tutorial</option><option value="saas_promo">saas_promo</option></select>
     <select id="cameraModeSelect"><option value="smooth_travel" selected>smooth_travel</option><option value="click_bounce">click_bounce</option></select>
     <select id="aspectSelect"><option value="youtube_16_9" selected>youtube_16_9</option><option value="shorts_9_16">shorts_9_16</option><option value="square_1_1">square_1_1</option></select>
     <select id="wallpaperSelect"><option value="dark_carbon" selected>dark_carbon</option><option value="cosmic_indigo">cosmic_indigo</option><option value="ocean_breeze">ocean_breeze</option><option value="sunset_saas">sunset_saas</option><option value="clean_daylight">clean_daylight</option></select>
     <select id="frameStyleSelect"><option value="minimal_rounded" selected>minimal_rounded</option><option value="macos_glass">macos_glass</option><option value="sharp_clean">sharp_clean</option></select>
-    <select id="countdownSelect"><option value="3" selected>3</option><option value="5">5</option><option value="0">0</option></select>
+    <select id="countdownSelect"><option value="3" selected>3</option></select>
     <input type="checkbox" id="chkAutoRigOnStop" checked />
-    <input type="checkbox" id="chkClickSfx" checked />
+    <input type="checkbox" id="chkClickSfx" />
     <input type="checkbox" id="chkAutoGhost" />
-    <input type="checkbox" id="chkAutoZoom" checked />
+    <input type="checkbox" id="chkAutoZoom" />
     <input type="checkbox" id="chkVectorCursor" checked />
     <input type="checkbox" id="chkRipples" checked />
     <button id="btnRecord" type="button"></button>
