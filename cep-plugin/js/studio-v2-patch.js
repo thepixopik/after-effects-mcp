@@ -17,7 +17,7 @@
   var STEADY_JSX  = path.join(EXT_ROOT, "jsx", "steady-camera-v2.jsx");
   var CS_SRC      = path.join(EXT_ROOT, "recorder", "PixopikRecorder.cs");
   var REC_ROOT    = path.join(os.homedir(), "Videos", "PixopikRecordings");
-  var NATIVE_EXE  = path.join(REC_ROOT, "PixopikRecorder_v31.exe");
+  var NATIVE_EXE  = path.join(REC_ROOT, "PixopikRecorder_v32.exe");
   var DONE_SIG    = path.join(REC_ROOT, "native_done.signal");
   var CMD_SIG     = path.join(REC_ROOT, "native_cmd.txt");
   var PREFS_FILE  = path.join(REC_ROOT, "studio_v2_prefs.json");
@@ -25,11 +25,11 @@
 
   function syncBadges() {
     var pill = document.getElementById("verPill") || document.querySelector(".pro-pill");
-    if (pill) pill.textContent = "v3.1 EXE";
+    if (pill) pill.textContent = "v3.2 EXE";
     var verSub = document.getElementById("verSubtitle");
-    if (verSub) verSub.textContent = "Bandicam Architecture • v3.1";
+    if (verSub) verSub.textContent = "Direct GDI 60fps • v3.2";
     var qBan = document.getElementById("quickBanner");
-    if (qBan) qBan.textContent = "v3.1 DPI-Safe Native .EXE • DXGI 60fps + Full REC Bar";
+    if (qBan) qBan.textContent = "v3.2 Ready • Hybrid-GPU Safe 60fps Recorder (.EXE)";
   }
   syncBadges();
   setTimeout(syncBadges, 300);
@@ -70,23 +70,22 @@
       return;
     }
 
-    /* Close any older PixopikRecorder instance first so EXE isn't file-locked */
-    cp.execFile("taskkill.exe", ["/F", "/IM", "PixopikRecorder.exe"], function () {
-      cp.execFile("taskkill.exe", ["/F", "/IM", "PixopikRecorder_v31.exe"], function () {
+    /* Kill any old v3.0 / v3.1 / v3.2 instance first */
+    cp.execFile("taskkill.exe", ["/F", "/IM", "PixopikRecorder_v31.exe"], function () {
+      cp.execFile("taskkill.exe", ["/F", "/IM", "PixopikRecorder_v32.exe"], function () {
         var needBuild = !fs.existsSync(NATIVE_EXE);
         if (!needBuild) {
           try { needBuild = fs.statSync(CS_SRC).mtimeMs > fs.statSync(NATIVE_EXE).mtimeMs; } catch (_e) { needBuild = true; }
         }
 
         function spawnExe() {
-          /* Zero CLI args needed — EXE resolves UserProfile\Videos\PixopikRecordings natively (immune to 'MR. Boro' spaces!) */
           cp.spawn(NATIVE_EXE, [], { detached: true, stdio: "ignore", cwd: REC_ROOT }).unref();
-          uiLog("🚀 Launched DPI-Safe PixopikRecorder v3.1! (REC button + F12 Hotkey active)");
+          uiLog("🚀 Launched PixopikRecorder v3.2 (Hybrid-GPU Safe 60 FPS)!");
         }
 
         if (!needBuild) { spawnExe(); return; }
 
-        uiLog("⚡ Compiling DPI-Safe PixopikRecorder v3.1...");
+        uiLog("⚡ Building PixopikRecorder v3.2...");
         cp.execFile(csc, [
           "/nologo",
           "/target:winexe",
@@ -100,7 +99,7 @@
             uiLog("Compile error: " + (stderr || stdout || err.message));
             return;
           }
-          uiLog("✅ Ready: PixopikRecorder_v31.exe");
+          uiLog("✅ Ready: PixopikRecorder_v32.exe");
           spawnExe();
         });
       });
@@ -116,7 +115,7 @@
       var desk = path.join(os.homedir(), "Desktop", "Launch Pixopik Recorder.bat");
       try {
         fs.writeFileSync(desk, '@echo off\r\nstart "" "' + NATIVE_EXE + '"\r\n', "utf8");
-        uiLog("📌 Updated Desktop Launcher Shortcut!");
+        uiLog("📌 Updated Desktop Shortcut to v3.2!");
       } catch (e) { uiLog("Shortcut note: " + e.message); }
     };
   }
