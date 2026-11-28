@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Pixopik Motion Studio Pro v3.4</title>
+  <title>Pixopik Motion Studio Pro v4.0</title>
   <link rel="stylesheet" href="./css/style.css" />
   <style>
     .header-right { display: flex; align-items: center; gap: 6px; }
@@ -24,14 +24,19 @@
       display: flex; gap: 6px; align-items: center; margin-top: 6px;
       background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 7px 8px;
     }
-    .dolly-bar input {
-      width: 68px; background: #1e293b; color: #38bdf8; border: 1px solid #475569;
-      border-radius: 6px; padding: 5px 6px; font-size: 12px; font-weight: 800; text-align: center;
+    .dolly-bar input[type="number"] {
+      width: 64px; background: #1e293b; color: #38bdf8; border: 1px solid #475569;
+      border-radius: 6px; padding: 5px 5px; font-size: 12px; font-weight: 800; text-align: center;
     }
     .dolly-bar select {
       flex: 1; background: #1e293b; color: #f8fafc; border: 1px solid #475569;
-      border-radius: 6px; padding: 5px 6px; font-size: 11.5px; font-weight: 700;
+      border-radius: 6px; padding: 5px 6px; font-size: 11.2px; font-weight: 700;
     }
+    .focusee-checks {
+      display: flex; flex-direction: column; gap: 5px; margin-top: 8px;
+      font-size: 11px; color: #cbd5e1;
+    }
+    .focusee-checks label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -40,8 +45,8 @@
       <div class="brand">
         <span class="badge-logo">PX</span>
         <div>
-          <div class="title">Pixopik Motion Studio <span class="pro-pill" id="verPill">v3.4</span></div>
-          <div class="subtitle" id="verSubtitle">Distance-Lock Dolly • v3.4</div>
+          <div class="title">Pixopik Motion Studio <span class="pro-pill" id="verPill">v4.0</span></div>
+          <div class="subtitle" id="verSubtitle">FocuSee 3-Layer Cinema • v4.0</div>
         </div>
       </div>
       <div class="header-right">
@@ -53,12 +58,12 @@
       </div>
     </header>
 
-    <div id="quickBanner" class="quick-banner">v3.4 Live • 550px Minimum Dolly Distance + Edge-Clamp Lock</div>
+    <div id="quickBanner" class="quick-banner">v4.0 FocuSee Engine • Click Zoom + Cursor Dolly + Typing Motion Blur</div>
 
     <!-- CARD 1: STANDALONE NATIVE RECORDER -->
     <section class="card">
       <div class="card-title">🎬 Standalone Native Screen Recorder (.EXE)</div>
-      <button id="btnOpenRecorderStudio" class="btn-studio-hero">🚀 Launch PixopikRecorder.exe (Native App)</button>
+      <button id="btnOpenRecorderStudio" class="btn-studio-hero">🚀 Launch PixopikRecorder v4.0 (.EXE)</button>
 
       <button id="btnStop" class="btn btn-stop hidden" style="width:100%;margin-bottom:6px;">■ Stop Active Recording &amp; Rig</button>
       <div id="recTimer" class="timer hidden">00:00 • Recording...</div>
@@ -68,7 +73,7 @@
         <button id="btnImportTts" class="btn btn-secondary">🎙️ + Add TTS Voice</button>
       </div>
       <div class="btn-row sub-actions" style="margin-top:5px;">
-        <button id="btnPinDesktopShortcut" class="btn btn-secondary" style="width:100%;">📌 Add Desktop Launcher Shortcut</button>
+        <button id="btnPinDesktopShortcut" class="btn btn-secondary" style="width:100%;">📌 Update Desktop Launcher Shortcut</button>
       </div>
 
       <div id="ffmpegBar" class="ffmpeg-bar hidden">
@@ -77,19 +82,24 @@
       </div>
     </section>
 
-    <!-- CARD 2: TRAVEL DOLLY MINIMUM DISTANCE CONTROLLER -->
+    <!-- CARD 2: FOCUSEE 3-LAYER CAMERA & MOTION BLUR ENGINE -->
     <section class="card">
-      <div class="card-title">📏 Travel Dolly Minimum Distance Lock</div>
-      <div style="font-size:10.5px;color:#94a3b8;">Cursor move below this px distance = 0% camera move (100% locked!)</div>
+      <div class="card-title">🌀 FocuSee 3-Layer Camera &amp; Motion Blur</div>
+      <div style="font-size:10.5px;color:#94a3b8;">Click = Zoom • Move &ge; px = Dolly • Typing = Hide Cursor + Speed Blur</div>
       <div class="dolly-bar">
         <select id="dollyDistPreset">
-          <option value="350">350 px (Medium)</option>
-          <option value="550" selected>550 px (Pro Default)</option>
-          <option value="800">800 px (Wide Lock)</option>
-          <option value="1050">1050 px (Ultra Lock)</option>
+          <option value="350">Move &ge; 350 px</option>
+          <option value="550" selected>Move &ge; 550 px (Pro)</option>
+          <option value="800">Move &ge; 800 px (Wide)</option>
+          <option value="1050">Move &ge; 1050 px</option>
         </select>
-        <input id="dollyDistCustom" type="number" min="100" max="1800" step="50" value="550" title="Exact Minimum Distance in Pixels" />
+        <input id="dollyDistCustom" type="number" min="100" max="1800" step="50" value="550" title="Minimum Cursor Distance in Pixels" />
         <button id="btnApplyDollyDist" class="btn-mini" style="background:#4f46e5;color:#fff;padding:6px 10px;">Apply</button>
+      </div>
+      <div class="focusee-checks">
+        <label><input type="checkbox" id="chkClickZoomPunch" checked /> 🎯 <b>Click = Zoom Focus</b> (150% &rarr; 165% Punch on Click)</label>
+        <label><input type="checkbox" id="chk3WayBlur" checked /> 🌀 <b>3-Way Motion Blur</b> (190&deg; Zoom + Dolly + Cursor Blur)</label>
+        <label><input type="checkbox" id="chkTypingRamp" checked /> ⌨️ <b>Smart Typing (&gt;2.5s)</b> (Auto-Hide Cursor + 1.85x Blur Ramp)</label>
       </div>
     </section>
 
@@ -97,7 +107,7 @@
     <section class="card">
       <div class="card-title">✨ Timeline Polish &amp; Creator Actions</div>
       <div class="grid-btns">
-        <button id="btnSmoothTravel" class="btn btn-chip accent-chip">🎥 Fix Camera Shake</button>
+        <button id="btnSmoothTravel" class="btn btn-chip accent-chip">🎥 Re-Apply FocuSee</button>
         <button id="btnSubscribe" class="btn btn-chip accent-chip">🔔 + YT Subscribe</button>
         <button id="btnChapter" class="btn btn-chip">📑 + YT Chapter</button>
         <button id="btnSpotlight" class="btn btn-chip">💡 + Spotlight</button>

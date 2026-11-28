@@ -18,7 +18,7 @@
   var STEADY_JSX  = path.join(EXT_ROOT, "jsx", "steady-camera-v2.jsx");
   var CS_SRC      = path.join(EXT_ROOT, "recorder", "PixopikRecorder.cs");
   var REC_ROOT    = path.join(process.env.USERPROFILE || os.homedir(), "Videos", "PixopikRecordings");
-  var NATIVE_EXE  = path.join(REC_ROOT, "PixopikRecorder_v34.exe");
+  var NATIVE_EXE  = path.join(REC_ROOT, "PixopikRecorder_v40.exe");
   var DONE_SIG    = path.join(REC_ROOT, "native_done.signal");
   var PORT_FILE   = path.join(REC_ROOT, "ae_bridge_port.txt");
   var PREFS_FILE  = path.join(REC_ROOT, "studio_v2_prefs.json");
@@ -26,11 +26,11 @@
 
   function syncBadges() {
     var pill = document.getElementById("verPill") || document.querySelector(".pro-pill");
-    if (pill) pill.textContent = "v3.4.1";
+    if (pill) pill.textContent = "v4.0";
     var verSub = document.getElementById("verSubtitle");
-    if (verSub) verSub.textContent = "Cursor Distance Dolly • v3.4.1";
+    if (verSub) verSub.textContent = "FocuSee 3-Layer Cinema • v4.0";
     var qBan = document.getElementById("quickBanner");
-    if (qBan) qBan.textContent = "v3.4.1 Live • Corner-to-Corner Cursor Dolly (>=550px)";
+    if (qBan) qBan.textContent = "v4.0 FocuSee Engine • Click Zoom + Cursor Dolly + Typing Motion Blur";
   }
   syncBadges();
   setTimeout(syncBadges, 300);
@@ -54,9 +54,24 @@
     }
   }
 
+  function findLatestMotionJson() {
+    try {
+      if (!fs.existsSync(REC_ROOT)) return "";
+      var dirs = fs.readdirSync(REC_ROOT).filter(function (d) { return d.indexOf("rec_") === 0; }).sort().reverse();
+      for (var i = 0; i < dirs.length; i++) {
+        var mp = path.join(REC_ROOT, dirs[i], "motion.json");
+        if (fs.existsSync(mp)) return mp.replace(/\\/g, "/");
+      }
+    } catch (_e) {}
+    return "";
+  }
+
   var presetSel = document.getElementById("dollyDistPreset");
   var customInp = document.getElementById("dollyDistCustom");
   var applyBtn  = document.getElementById("btnApplyDollyDist");
+  var chkClick  = document.getElementById("chkClickZoomPunch");
+  var chkBlur   = document.getElementById("chk3WayBlur");
+  var chkType   = document.getElementById("chkTypingRamp");
 
   function getSelectedMinPx() {
     if (customInp && parseInt(customInp.value, 10) >= 80) return parseInt(customInp.value, 10);
@@ -70,24 +85,37 @@
   }
 
   var applyingNow = false;
-  function applyDollyDistanceToOpenComp(pxVal, autoSilent) {
+  function applyFocuSeeToOpenComp(pxVal, autoSilent, explicitMotionPath) {
     if (applyingNow) return;
     applyingNow = true;
     var minPx = parseInt(pxVal, 10) || getSelectedMinPx();
+    var opts = {
+      minDollyPx: minPx,
+      zoomPercent: 148,
+      clickZoomPunch: chkClick ? chkClick.checked : true,
+      threeWayBlur: chkBlur ? chkBlur.checked : true,
+      typingRamp: chkType ? chkType.checked : true,
+      motionPath: explicitMotionPath || findLatestMotionJson()
+    };
+
     try {
       var curP = fs.existsSync(PREFS_FILE) ? JSON.parse(fs.readFileSync(PREFS_FILE, "utf8")) : {};
       curP.minDollyPx = minPx;
+      curP.threeWayBlur = opts.threeWayBlur;
+      curP.typingRamp = opts.typingRamp;
       fs.writeFileSync(PREFS_FILE, JSON.stringify(curP), "utf8");
     } catch (_ep) {}
 
     injectSteadyJsx(function () {
       if (!window.__adobe_cep__) { applyingNow = false; return; }
-      window.__adobe_cep__.evalScript("$.global.PixopikApplyDollyDistance(" + minPx + ", 148)", function (raw) {
+      var argStr = JSON.stringify(JSON.stringify(opts));
+      window.__adobe_cep__.evalScript("$.global.PixopikApplyFocuSeeEngine(" + argStr + ")", function (raw) {
         applyingNow = false;
         try {
           var r = JSON.parse(raw || "{}");
           if (r && r.ok) {
-            uiLog("🎥 Travel Dolly (" + r.minDistPx + "px lock) -> " + r.glides + " smooth glides applied on " + r.compName + "!");
+            var extra = r.typingRamps ? (" • " + r.typingRamps + " typing speed-ramps!") : "";
+            uiLog("🌀 FocuSee v4.0 (" + r.minDistPx + "px Dolly, " + r.clickPunches + " click-zooms, " + r.glides + " glides, 3-Way Blur ON" + extra + ")");
           } else if (!autoSilent && r && r.error) {
             uiLog("Note: " + r.error);
           }
@@ -96,10 +124,11 @@
     });
   }
 
-  /* 1. Auto-apply immediately when v3.4.1 loads onto currently open YT_Tutorial_screen! */
-  setTimeout(function () { applyDollyDistanceToOpenComp(getSelectedMinPx(), true); }, 750);
+  /* 1. Auto-upgrade currently open composition right on v4.0 Sync! */
+  setTimeout(function () { applyFocuSeeToOpenComp(getSelectedMinPx(), true); }, 750);
 
-  /* 2. Watch #logList so EVERY time panel.js finishes 'Rigged in X.XXs', we auto-apply Cursor Distance Dolly! */
+  /* 2. Auto-apply FocuSee Engine immediately after EVERY panel.js 'Rigged in X.XXs' event! */
+  var lastSessMotion = "";
   var logContainer = document.getElementById("logList");
   if (logContainer && typeof MutationObserver !== "undefined") {
     var obs = new MutationObserver(function (muts) {
@@ -108,7 +137,8 @@
         for (var j = 0; j < added.length; j++) {
           var txt = added[j].textContent || "";
           if (txt.indexOf("Rigged in ") !== -1) {
-            setTimeout(function () { applyDollyDistanceToOpenComp(getSelectedMinPx(), false); }, 140);
+            var mp = lastSessMotion || findLatestMotionJson();
+            setTimeout(function () { applyFocuSeeToOpenComp(getSelectedMinPx(), false, mp); }, 150);
             return;
           }
         }
@@ -117,21 +147,23 @@
     obs.observe(logContainer, { childList: true });
   }
 
-  /* 3. Wire UI controls & Fix Camera Shake button */
+  /* 3. Wire UI controls */
   if (presetSel && customInp) {
     presetSel.onchange = function () {
       customInp.value = presetSel.value;
-      applyDollyDistanceToOpenComp(presetSel.value, false);
+      applyFocuSeeToOpenComp(presetSel.value, false);
     };
   }
-  if (applyBtn && customInp) {
-    applyBtn.onclick = function () { applyDollyDistanceToOpenComp(customInp.value, false); };
-  }
+  if (applyBtn && customInp) applyBtn.onclick = function () { applyFocuSeeToOpenComp(customInp.value, false); };
+  if (chkClick) chkClick.onchange = function () { applyFocuSeeToOpenComp(getSelectedMinPx(), false); };
+  if (chkBlur)  chkBlur.onchange  = function () { applyFocuSeeToOpenComp(getSelectedMinPx(), false); };
+  if (chkType)  chkType.onchange  = function () { applyFocuSeeToOpenComp(getSelectedMinPx(), false); };
+
   var fixBtn = document.getElementById("btnSmoothTravel");
   if (fixBtn) {
     fixBtn.onclick = function (ev) {
       if (ev && ev.stopImmediatePropagation) ev.stopImmediatePropagation();
-      applyDollyDistanceToOpenComp(getSelectedMinPx(), false);
+      applyFocuSeeToOpenComp(getSelectedMinPx(), false);
     };
   }
 
@@ -139,11 +171,14 @@
   function triggerAutoRigForSession(sessDir) {
     if (!sessDir || sessDir === lastRiggedSess) return;
     lastRiggedSess = sessDir;
+    lastSessMotion = path.join(sessDir, "motion.json").replace(/\\/g, "/");
     try { if (fs.existsSync(DONE_SIG)) fs.unlinkSync(DONE_SIG); } catch (_e) {}
 
     var prefs = {};
     try { if (fs.existsSync(PREFS_FILE)) prefs = JSON.parse(fs.readFileSync(PREFS_FILE, "utf8")); } catch (_ep) {}
     if (prefs.minDollyPx && customInp) customInp.value = String(prefs.minDollyPx);
+    if (typeof prefs.threeWayBlur === "boolean" && chkBlur) chkBlur.checked = prefs.threeWayBlur;
+    if (typeof prefs.typingRamp === "boolean" && chkType) chkType.checked = prefs.typingRamp;
     try {
       if (prefs.editMode && document.getElementById("modeSelect")) document.getElementById("modeSelect").value = prefs.editMode;
       if (prefs.aspectPreset && document.getElementById("aspectSelect")) document.getElementById("aspectSelect").value = prefs.aspectPreset;
@@ -211,24 +246,27 @@
     if (!csc || !fs.existsSync(CS_SRC)) { uiLog("Compiler missing: " + CS_SRC); return; }
 
     cp.execFile("taskkill.exe", ["/F", "/IM", "PixopikRecorder_v34.exe"], function () {
-      var needBuild = !fs.existsSync(NATIVE_EXE);
-      if (!needBuild) {
-        try { needBuild = fs.statSync(CS_SRC).mtimeMs > fs.statSync(NATIVE_EXE).mtimeMs; } catch (_e) { needBuild = true; }
-      }
-      function spawnExe() {
-        var envCopy = Object.assign({}, process.env, { PIXOPIK_REC_ROOT: REC_ROOT });
-        cp.spawn(NATIVE_EXE, [], { detached: true, stdio: "ignore", cwd: REC_ROOT, env: envCopy }).unref();
-        uiLog("🚀 Launched PixopikRecorder v3.4.1!");
-      }
-      if (!needBuild) { spawnExe(); return; }
-      uiLog("⚡ Building PixopikRecorder...");
-      cp.execFile(csc, [
-        "/nologo", "/target:winexe", "/optimize+",
-        "/r:System.Windows.Forms.dll", "/r:System.Drawing.dll", "/r:System.dll",
-        "/out:" + NATIVE_EXE, CS_SRC
-      ], { timeout: 15000 }, function (err, stdout, stderr) {
-        if (err && !fs.existsSync(NATIVE_EXE)) { uiLog("Compile error: " + (stderr || stdout || err.message)); return; }
-        spawnExe();
+      cp.execFile("taskkill.exe", ["/F", "/IM", "PixopikRecorder_v40.exe"], function () {
+        var needBuild = !fs.existsSync(NATIVE_EXE);
+        if (!needBuild) {
+          try { needBuild = fs.statSync(CS_SRC).mtimeMs > fs.statSync(NATIVE_EXE).mtimeMs; } catch (_e) { needBuild = true; }
+        }
+        function spawnExe() {
+          var envCopy = Object.assign({}, process.env, { PIXOPIK_REC_ROOT: REC_ROOT });
+          cp.spawn(NATIVE_EXE, [], { detached: true, stdio: "ignore", cwd: REC_ROOT, env: envCopy }).unref();
+          uiLog("🚀 Launched PixopikRecorder v4.0 (FocuSee Engine)!");
+        }
+        if (!needBuild) { spawnExe(); return; }
+        uiLog("⚡ Building PixopikRecorder v4.0...");
+        cp.execFile(csc, [
+          "/nologo", "/target:winexe", "/optimize+",
+          "/r:System.Windows.Forms.dll", "/r:System.Drawing.dll", "/r:System.dll",
+          "/out:" + NATIVE_EXE, CS_SRC
+        ], { timeout: 15000 }, function (err, stdout, stderr) {
+          if (err && !fs.existsSync(NATIVE_EXE)) { uiLog("Compile error: " + (stderr || stdout || err.message)); return; }
+          uiLog("✅ Ready: PixopikRecorder_v40.exe");
+          spawnExe();
+        });
       });
     });
   }
@@ -242,7 +280,7 @@
       var desk = path.join(os.homedir(), "Desktop", "Launch Pixopik Recorder.bat");
       try {
         fs.writeFileSync(desk, '@echo off\r\nset "PIXOPIK_REC_ROOT=' + REC_ROOT + '"\r\nstart "" "' + NATIVE_EXE + '"\r\n', "utf8");
-        uiLog("📌 Updated Desktop Shortcut!");
+        uiLog("📌 Updated Desktop Shortcut to v4.0!");
       } catch (e) { uiLog("Shortcut note: " + e.message); }
     };
   }
